@@ -1,4 +1,4 @@
-"""Apply configurable CV-score workflow rules and request the matching email."""
+"""Apply CV-score outcomes and trigger the corresponding recruiting email."""
 
 import logging
 from typing import Literal
@@ -17,7 +17,7 @@ from app.services.email_automation_service import (
 
 logger = logging.getLogger(__name__)
 ScoreAction = Literal[
-    "agent_review",
+    "auto_reject",
     "hr_review",
     "hr_decision",
     "interview_eligible",
@@ -31,7 +31,7 @@ def classify_score(
     required_skills: list[str] | None = None,
     has_relevant_evidence: bool | None = None,
 ) -> ScoreAction:
-    """Route weak, irrelevant, or unmatched resumes to the separate HR queue."""
+    """Automatically reject clear failures; keep borderline cases with HR."""
     reject_below = settings.email_automation_reject_below_score
     review_through = settings.email_automation_review_through_score
     interview_from = settings.email_automation_interview_from_score
@@ -40,12 +40,15 @@ def classify_score(
         0 <= reject_below <= review_through < interview_from <= interview_through <= 100
     ):
         raise ValueError("Email automation score thresholds are not ordered correctly.")
+
+    # Explicitly empty relevance evidence or no required-skill matches is a
+    # clear mismatch. Missing evidence is not treated as proof of irrelevance.
     if has_relevant_evidence is False:
-        return "agent_review"
+        return "auto_reject"
     if required_skills and matched_skills is not None and not matched_skills:
-        return "agent_review"
+        return "auto_reject"
     if score < reject_below:
-        return "agent_review"
+        return "auto_reject"
     if score <= review_through:
         return "hr_review"
     if score < interview_from:
@@ -57,44 +60,40 @@ def classify_score(
     return "hr_review"
 
 
-def apply_resume_score_outcome(
-    db: Session,
-    resume: ResumeEvaluation,
-) -> None:
-    """Update an unreviewed application after its score is saved."""
+def apply_resume_score_outcome(db: Session, resume: ResumeEvaluation) -> None:
+    """Apply a score once, then send the matching email where consent permits."""
     if resume.score is None or resume.application_id is None:
         return
     application = db.get(Application, resume.application_id)
     if application is None or application.status != "pending_review":
         return
+
+    job = db.get(Job, resume.job_id or application.job_id)
+    if job is None:
+        logger.warning(
+            "Could not apply email automation to %s: related job is missing.",
+            application.id,
+        )
+        return
+
+    details = resume.evaluation_details or {}
+    matched_skills = details.get("matched_skills")
+    if not isinstance(matched_skills, list):
+        matched_skills = None
+    evidence_keys = (
+        "evidence",
+        "candidate_strengths",
+        "relevant_experience",
+        "relevant_projects",
+    )
+    has_evidence_data = any(key in details for key in evidence_keys)
+    has_relevant_evidence = (
+        any(isinstance(details.get(key), list) and details[key] for key in evidence_keys)
+        if has_evidence_data
+        else None
+    )
+
     try:
-        job = db.get(Job, resume.job_id or application.job_id)
-        if job is None:
-            logger.warning(
-                "Could not apply email automation to %s: related job is missing.",
-                application.id,
-            )
-            return
-        evaluation_details = resume.evaluation_details or {}
-        matched_skills = evaluation_details.get("matched_skills")
-        if not isinstance(matched_skills, list):
-            matched_skills = None
-        evidence_keys = (
-            "evidence",
-            "candidate_strengths",
-            "relevant_experience",
-            "relevant_projects",
-        )
-        has_evidence_data = any(key in evaluation_details for key in evidence_keys)
-        has_relevant_evidence = (
-            any(
-                isinstance(evaluation_details.get(key), list)
-                and evaluation_details[key]
-                for key in evidence_keys
-            )
-            if has_evidence_data
-            else None
-        )
         action = classify_score(
             resume.score,
             matched_skills=matched_skills,
@@ -105,47 +104,32 @@ def apply_resume_score_outcome(
         logger.exception("Email automation score thresholds are invalid.")
         return
 
-    if action == "agent_review":
-        evaluation_details = resume.evaluation_details or {}
-        matched_skills = evaluation_details.get("matched_skills", [])
-        evidence = evaluation_details.get("evidence", [])
-        candidate_strengths = evaluation_details.get("candidate_strengths", [])
-        relevant_experience = evaluation_details.get("relevant_experience", [])
-        relevant_projects = evaluation_details.get("relevant_projects", [])
+    if action == "auto_reject":
         reasons: list[str] = []
         if resume.score < settings.email_automation_reject_below_score:
             reasons.append(
                 f"CV score {resume.score}% is below "
                 f"{settings.email_automation_reject_below_score}%."
             )
-        if (
-            job.required_skills
-            and isinstance(matched_skills, list)
-            and not matched_skills
-        ):
+        if job.required_skills and matched_skills is not None and not matched_skills:
             reasons.append("No required job skills were matched in the CV.")
-        has_evidence_data = any(
-            key in evaluation_details
-            for key in (
-                "evidence",
-                "candidate_strengths",
-                "relevant_experience",
-                "relevant_projects",
-            )
-        )
-        if has_evidence_data and not any(
-            isinstance(items, list) and items
-            for items in (
-                evidence,
-                candidate_strengths,
-                relevant_experience,
-                relevant_projects,
-            )
-        ):
+        if has_evidence_data and has_relevant_evidence is False:
             reasons.append("The evaluation found no relevant CV evidence for this job.")
-        application.status = "over_agent_review"
-        application.agent_review_reason = " ".join(reasons)
+
+        application.status = "rejected_by_agent"
+        application.agent_review_reason = " ".join(reasons) or (
+            "The CV did not meet the configured screening criteria."
+        )
         db.commit()
+        candidate = db.get(Candidate, application.candidate_id)
+        if candidate is not None:
+            try:
+                send_application_email(db, application, "rejection")
+            except EmailAutomationError:
+                logger.exception(
+                    "Could not send the automated rejection email for application %s.",
+                    application.id,
+                )
     elif action == "interview_eligible":
         application.status = "interview_eligible"
         db.commit()
@@ -154,4 +138,6 @@ def apply_resume_score_outcome(
             try:
                 send_application_email(db, application, "screening_invitation")
             except EmailAutomationError:
-                logger.exception("Could not prepare an eligible candidate's screening invitation.")
+                logger.exception(
+                    "Could not prepare an eligible candidate's screening invitation."
+                )
