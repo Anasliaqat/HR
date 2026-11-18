@@ -17,19 +17,32 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.application import Application
+from app.models.candidate import Candidate
 from app.models.email_log import EmailLog
 from app.models.interview import Interview
 from app.services.phone_service import normalize_phone_number
 
 logger = logging.getLogger(__name__)
 RESEND_EMAILS_URL = "https://api.resend.com/emails"
+SMTP_SSL_PORT = 465
 EmailType = Literal[
     "rejection",
     "selection",
     "screening_invitation",
     "interview_invitation",
 ]
+EMAIL_TYPES = ("rejection", "selection", "screening_invitation", "interview_invitation")
 CONSENT_REQUIRED = "Candidate email consent has not been recorded."
+
+
+def has_email_consent(candidate: Candidate) -> bool:
+    """Whether this candidate may be emailed under the configured consent policy."""
+    return bool(candidate.email_consent) or not settings.email_automation_require_consent
+
+
+def _error_detail(exc: Exception) -> str:
+    """A short, password-free reason so failures are diagnosable from the HR UI."""
+    return f"{type(exc).__name__}: {str(exc)[:200]}"
 
 
 class EmailAutomationError(RuntimeError):
@@ -175,13 +188,16 @@ def _deliver(preview: EmailPreview, idempotency_key: str) -> str | None:
             f"<{hashlib.sha256(idempotency_key.encode()).hexdigest()}@zetech.local>"
         )
         message.set_content(preview.body)
+        use_ssl = settings.smtp_port == SMTP_SSL_PORT
+        smtp_class = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
         try:
-            with smtplib.SMTP(
+            with smtp_class(
                 settings.smtp_host,
                 settings.smtp_port,
                 timeout=20,
             ) as client:
-                client.starttls()
+                if not use_ssl:
+                    client.starttls()
                 if settings.smtp_user:
                     if not settings.smtp_password:
                         raise EmailAutomationError(
@@ -190,8 +206,10 @@ def _deliver(preview: EmailPreview, idempotency_key: str) -> str | None:
                     client.login(settings.smtp_user, settings.smtp_password)
                 client.send_message(message)
         except (OSError, smtplib.SMTPException) as exc:
-            logger.warning("SMTP recruiting email delivery failed.")
-            raise EmailAutomationError("SMTP could not deliver the recruiting email.") from exc
+            logger.warning("SMTP recruiting email delivery failed: %s", _error_detail(exc))
+            raise EmailAutomationError(
+                f"SMTP could not deliver the recruiting email ({_error_detail(exc)})."
+            ) from exc
         return message["Message-ID"]
 
     if not resend_configured or not settings.email_from_address:
@@ -218,16 +236,18 @@ def _deliver(preview: EmailPreview, idempotency_key: str) -> str | None:
         payload = response.json()
     except httpx.HTTPStatusError as exc:
         logger.error(
-            "Resend recruiting email request failed with HTTP %s",
+            "Resend recruiting email request failed with HTTP %s: %s",
             exc.response.status_code,
+            exc.response.text[:200],
         )
         raise EmailAutomationError(
-            "Resend rejected the recruiting email."
+            f"Resend rejected the recruiting email (HTTP {exc.response.status_code}: "
+            f"{exc.response.text[:200]})."
         ) from exc
     except (httpx.RequestError, ValueError) as exc:
-        logger.error("Resend recruiting email request failed.")
+        logger.error("Resend recruiting email request failed: %s", _error_detail(exc))
         raise EmailAutomationError(
-            "Resend could not deliver the recruiting email."
+            f"Resend could not deliver the recruiting email ({_error_detail(exc)})."
         ) from exc
     message_id = payload.get("id") if isinstance(payload, dict) else None
     if not isinstance(message_id, str):
@@ -329,7 +349,12 @@ def send_application_email(
         email_log.error_message = None
         db.commit()
 
-    if not application.candidate.email_consent:
+    if not has_email_consent(application.candidate):
+        logger.warning(
+            "%s email for application %s is held: candidate email consent is not recorded.",
+            email_type,
+            application.id,
+        )
         email_log.error_message = CONSENT_REQUIRED
         db.commit()
         db.refresh(email_log)
@@ -350,6 +375,44 @@ def send_application_email(
     db.commit()
     db.refresh(email_log)
     return email_log
+
+
+def send_consent_pending_emails(db: Session, candidate: Candidate) -> list[EmailLog]:
+    """Deliver emails that were held back until this candidate's consent was recorded."""
+    if not has_email_consent(candidate):
+        return []
+    held = db.scalars(
+        select(EmailLog)
+        .join(Application, EmailLog.application_id == Application.id)
+        .where(
+            Application.candidate_id == candidate.id,
+            EmailLog.status == "pending",
+            EmailLog.error_message == CONSENT_REQUIRED,
+            EmailLog.deleted_at.is_(None),
+            EmailLog.email_type.in_(EMAIL_TYPES),
+        )
+        .order_by(EmailLog.created_at)
+    ).all()
+    delivered: list[EmailLog] = []
+    for held_log in held:
+        application = db.get(Application, held_log.application_id)
+        interview = (
+            db.get(Interview, held_log.interview_id)
+            if held_log.interview_id is not None
+            else None
+        )
+        try:
+            delivered.append(
+                send_application_email(db, application, held_log.email_type, interview)
+            )
+        except EmailAutomationError:
+            logger.warning(
+                "Held %s email %s could not be sent after consent was recorded.",
+                held_log.email_type,
+                held_log.id,
+                exc_info=True,
+            )
+    return delivered
 
 
 def get_email_log(db: Session, email_log_id: UUID) -> EmailLog | None:

@@ -27,6 +27,7 @@ from app.services.email_automation_service import (
     EmailSendInProgress,
     build_email_preview,
     get_email_log,
+    has_email_consent,
     send_application_email,
 )
 
@@ -300,7 +301,7 @@ def preview_application_email(
         and application.status == "over_agent_review"
     ):
         reason = "This application is in the Over Agent Review workflow; automated emails are disabled."
-    elif not application.candidate.email_consent:
+    elif not has_email_consent(application.candidate):
         reason = "Record candidate email consent before sending."
     elif email_type == "rejection" and application.status not in {
         "rejected",
@@ -400,8 +401,10 @@ def decide_agent_review(
     db: Session = Depends(get_db),
 ) -> AgentReviewDecisionResponse:
     application = _get_application(db, application_id)
+    # HR can decide queued applications, and can also override an automatic
+    # rejection (status "rejected" with a recorded agent review reason).
     if (
-        application.status != "over_agent_review"
+        application.status not in {"over_agent_review", "rejected"}
         or not application.agent_review_reason
     ):
         raise HTTPException(

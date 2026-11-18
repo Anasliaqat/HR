@@ -12,6 +12,7 @@ from app.models.job import Job
 from app.models.resume_evaluation import ResumeEvaluation
 from app.services.email_automation_service import (
     EmailAutomationError,
+    has_email_consent,
     send_application_email,
 )
 
@@ -143,14 +144,24 @@ def apply_resume_score_outcome(
             )
         ):
             reasons.append("The evaluation found no relevant CV evidence for this job.")
-        application.status = "over_agent_review"
         application.agent_review_reason = " ".join(reasons)
-        db.commit()
+        if settings.email_automation_auto_reject:
+            # Irrelevant CV or score below the threshold: reject and tell the
+            # candidate. The reason stays on the application as an audit trail.
+            application.status = "rejected"
+            db.commit()
+            try:
+                send_application_email(db, application, "rejection")
+            except EmailAutomationError:
+                logger.exception("Could not prepare the automatic rejection email.")
+        else:
+            application.status = "over_agent_review"
+            db.commit()
     elif action == "interview_eligible":
         application.status = "interview_eligible"
         db.commit()
         candidate = db.get(Candidate, application.candidate_id)
-        if candidate and candidate.email_consent and candidate.phone:
+        if candidate and has_email_consent(candidate) and candidate.phone:
             try:
                 send_application_email(db, application, "screening_invitation")
             except EmailAutomationError:

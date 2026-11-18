@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     email_automation_above_range_action: Literal[
         "pending_review", "interview_eligible"
     ] = "pending_review"
+    # Irrelevant CVs and scores below the reject threshold are rejected and the
+    # candidate is emailed automatically. Set to false to send them to the
+    # Over Agent Review queue for HR instead.
+    email_automation_auto_reject: bool = True
+    # Candidate emails are only delivered once consent is recorded. Set to false
+    # only if your application process already covers decision emails.
+    email_automation_require_consent: bool = True
 
     model_config = SettingsConfigDict(
         env_file=BACKEND_ENV_FILE,
