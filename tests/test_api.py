@@ -69,7 +69,7 @@ def client(
 
 def test_home_health_docs_and_cors(client: TestClient) -> None:
     assert client.get("/").status_code == 200
-    assert client.get("/health").json() == {"status": "ok"}
+    assert client.get("/health").json() == {"status": "ok", "database": "connected"}
     assert client.get("/docs").status_code == 200
     paths = client.get("/openapi.json").json()["paths"]
     expected_operations = {
