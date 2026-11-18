@@ -85,7 +85,7 @@ def create_application(
 @pytest.mark.parametrize(
     ("score", "expected"),
     [
-        (49, "agent_review"),
+        (49, "auto_reject"),
         (50, "hr_review"),
         (60, "hr_review"),
         (61, "hr_decision"),
@@ -110,7 +110,7 @@ def test_missing_match_evidence_does_not_count_as_no_skill_match() -> None:
     ) == "hr_review"
 
 
-def test_low_score_routes_to_agent_review_without_sending_email(
+def test_low_score_auto_rejects_and_attempts_rejection_email(
     db_session: Session,
 ) -> None:
     application, resume = create_application(db_session, score=42)
@@ -118,13 +118,17 @@ def test_low_score_routes_to_agent_review_without_sending_email(
     apply_resume_score_outcome(db_session, resume)
 
     db_session.refresh(application)
-    assert application.status == "over_agent_review"
+    assert application.status == "rejected_by_agent"
     assert "42%" in application.agent_review_reason
     assert "below" in application.agent_review_reason
-    assert db_session.scalar(select(EmailLog)) is None
+    email_log = db_session.scalar(select(EmailLog))
+    assert email_log is not None
+    assert email_log.email_type == "rejection"
+    assert email_log.status == "pending"
+    assert email_log.error_message == email_automation_service.CONSENT_REQUIRED
 
     apply_resume_score_outcome(db_session, resume)
-    assert len(db_session.scalars(select(EmailLog)).all()) == 0
+    assert len(db_session.scalars(select(EmailLog)).all()) == 1
 
 
 def test_review_score_stays_pending_without_sending_email(
@@ -194,9 +198,10 @@ def test_no_required_skill_match_routes_to_agent_review_without_email(
 
     db_session.refresh(application)
     email_log = db_session.scalar(select(EmailLog))
-    assert application.status == "over_agent_review"
+    assert application.status == "rejected_by_agent"
     assert "No required job skills were matched" in application.agent_review_reason
-    assert email_log is None
+    assert email_log is not None
+    assert email_log.email_type == "rejection"
 
 
 def test_explicitly_empty_relevance_evidence_routes_to_agent_review(
@@ -214,9 +219,11 @@ def test_explicitly_empty_relevance_evidence_routes_to_agent_review(
     apply_resume_score_outcome(db_session, resume)
 
     db_session.refresh(application)
-    assert application.status == "over_agent_review"
+    assert application.status == "rejected_by_agent"
     assert "no relevant CV evidence" in application.agent_review_reason
-    assert db_session.scalar(select(EmailLog)) is None
+    email_log = db_session.scalar(select(EmailLog))
+    assert email_log is not None
+    assert email_log.email_type == "rejection"
 
 
 def test_missing_relevance_evidence_is_not_assumed_irrelevant(
@@ -478,19 +485,7 @@ def test_hr_decision_and_history_api_preserve_consent_gate(
     ).status_code == 410
 
 
-@pytest.mark.parametrize(
-    ("hr_decision", "expected_status", "expected_email"),
-    [
-        ("approve", "approved_by_hr", "selection"),
-        ("reject", "rejected_by_hr", "rejection"),
-    ],
-)
-def test_agent_review_decision_attempts_matching_email_with_audit_record(
-    api_client: TestClient,
-    hr_decision: str,
-    expected_status: str,
-    expected_email: str,
-) -> None:
+def test_hr_approval_attempts_selection_email(api_client: TestClient) -> None:
     candidate_response = api_client.post(
         "/api/candidates",
         json={"full_name": "Taylor Candidate", "email": "taylor@example.com"},
@@ -508,63 +503,33 @@ def test_agent_review_decision_attempts_matching_email_with_audit_record(
             "status": "open",
         },
     )
-    job_id = job_response.json()["id"]
     application_response = api_client.post(
         "/api/applications",
-        json={"candidate_id": candidate_id, "job_id": job_id},
+        json={"candidate_id": candidate_id, "job_id": job_response.json()["id"]},
     )
     application_id = application_response.json()["id"]
     factory = sessionmaker(bind=connection.get_engine(), expire_on_commit=False)
     with factory() as db:
-        resume = ResumeEvaluation(
-            candidate_id=UUID(candidate_id),
-            application_id=UUID(application_id),
-            job_id=UUID(job_id),
-            file_name="candidate.pdf",
-            file_path="candidate.pdf",
-            score=45,
-            evaluation_details={
-                "matched_skills": [],
-                "missing_required_skills": ["Python"],
-            },
-            evaluation_status="completed",
+        db.add(
+            ResumeEvaluation(
+                candidate_id=UUID(candidate_id),
+                application_id=UUID(application_id),
+                job_id=UUID(job_response.json()["id"]),
+                file_name="candidate.pdf",
+                file_path="candidate.pdf",
+                score=65,
+                evaluation_status="completed",
+            )
         )
-        db.add(resume)
         db.commit()
-        apply_resume_score_outcome(db, resume)
-
-    queue_response = api_client.get("/api/email-automation/review-queue")
-    assert queue_response.status_code == 200
-    queue_item = queue_response.json()[0]
-    assert queue_item["application_id"] == application_id
-    assert queue_item["cv_score"] == 45
-    assert queue_item["matched_skills"] == []
-    assert queue_item["missing_skills"] == ["Python"]
-    assert "below" in queue_item["reason"]
-    assert api_client.get("/api/email-automation/history").json() == []
 
     decision = api_client.post(
-        f"/api/email-automation/review-queue/{application_id}/decision",
-        json={"decision": hr_decision},
+        f"/api/email-automation/applications/{application_id}/decision",
+        json={"decision": "approve"},
     )
     assert decision.status_code == 200
-    assert decision.json()["status"] == expected_status
-    assert decision.json()["email"]["email_type"] == expected_email
-    assert decision.json()["email"]["status"] == "failed"
-    assert "Configure RESEND_API_KEY" in decision.json()["email"]["error_message"]
-    assert api_client.get("/api/email-automation/review-queue").json() == []
-
-    preview = api_client.get(
-        f"/api/email-automation/applications/{application_id}/preview",
-        params={"email_type": expected_email},
-    )
-    assert preview.status_code == 200
-    assert preview.json()["can_send"] is True
-
-    manual_send = api_client.post(
-        f"/api/email-automation/applications/{application_id}/send",
-        json={"email_type": expected_email},
-    )
-    assert manual_send.status_code == 200
-    assert manual_send.json()["status"] == "failed"
-    assert len(api_client.get("/api/email-automation/history").json()) == 1
+    assert decision.json()["email_type"] == "selection"
+    assert decision.json()["status"] == "failed"
+    assert "Configure RESEND_API_KEY" in decision.json()["error_message"]
+    application = api_client.get(f"/api/applications/{application_id}")
+    assert application.json()["status"] == "approved_by_hr"
