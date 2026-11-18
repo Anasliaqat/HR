@@ -14,7 +14,10 @@ ENV/
 .coverage
 htmlcov/
 
-# Uploaded candidate files and local data
+# Local databases, uploaded candidate files and local data
+backend/*.db
+backend/*.sqlite
+backend/*.sqlite3
 backend/uploads/*
 !backend/uploads/.gitkeep
 
