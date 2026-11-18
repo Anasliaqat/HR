@@ -1,8 +1,8 @@
 # AI-Powered HR Hiring Automation
 
-A starter project for an HR-reviewed hiring workflow using FastAPI, React, PostgreSQL, OpenAI, LangGraph, and Vapi.
+A starter project for an HR-reviewed hiring workflow using FastAPI, React, SQLite/PostgreSQL, local resume matching, email delivery, Vapi, and Google Calendar.
 
-The planned workflow has three AI-assisted stages:
+The workflow includes these AI-assisted stages:
 
 1. PDF/DOCX resume parsing and local semantic job-match scoring.
 2. Screening calls and answer summaries.
@@ -14,8 +14,8 @@ AI output is advisory. HR must review and approve candidates before they advance
 
 - `backend/` — FastAPI application, API modules, agents, services, models, and database setup.
 - `frontend/` — React application built with Vite.
-- `tests/` — backend and frontend tests (to be added).
-- `docker-compose.yml` — local PostgreSQL service for development.
+- `tests/` and `backend/tests/` — backend API, agent, and integration tests.
+- `docker-compose.yml` — optional PostgreSQL service for development.
 
 ## Requirements
 
@@ -173,7 +173,7 @@ Open `http://127.0.0.1:8000/docs` to try the endpoints interactively:
 
 Validation errors return HTTP 422, missing records return HTTP 404, duplicates/conflicts or unapproved stage transitions return HTTP 409, and unavailable integrations return HTTP 502. AI results are advisory, and this backend does not automatically reject candidates. Candidate text is treated as untrusted data; evaluation excludes obvious instruction lines and protected-trait fields and uses only job-related evidence. Screening transcripts are also untrusted input; summaries are restricted to job-related answers and never evaluate voice, accent, emotion, personality, or protected traits. Authentication and authorization for HR approval are not implemented yet; do not expose this starter API publicly.
 
-Run the backend tests from the `backend/` directory. Tests use an isolated in-memory SQLite database and do not require a running PostgreSQL server:
+Run the backend tests from the project root. Tests use an isolated in-memory SQLite database and do not require Docker or a running PostgreSQL server:
 
 ```powershell
 python -m pytest ..\tests
