@@ -7,6 +7,7 @@ from collections.abc import AsyncGenerator
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api import (
@@ -19,7 +20,7 @@ from app.api import (
     screening,
 )
 from app.config import settings
-from app.database.connection import init_db
+from app.database.connection import get_engine, init_db
 
 logger = logging.getLogger(__name__)
 
@@ -79,5 +80,18 @@ async def home() -> dict[str, str]:
 
 
 @app.get("/health", tags=["health"])
-async def health_check() -> dict[str, str]:
-    return {"status": "ok"}
+async def health_check() -> JSONResponse:
+    """Report API and database readiness instead of API process liveness only."""
+    try:
+        with get_engine().connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except (SQLAlchemyError, RuntimeError) as exc:
+        logger.warning("Health check database probe failed: %s", exc)
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "database": "unavailable"},
+        )
+    return JSONResponse(
+        status_code=200,
+        content={"status": "ok", "database": "connected"},
+    )
