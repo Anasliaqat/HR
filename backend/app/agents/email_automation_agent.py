@@ -114,6 +114,12 @@ def apply_resume_score_outcome(
         relevant_experience = evaluation_details.get("relevant_experience", [])
         relevant_projects = evaluation_details.get("relevant_projects", [])
         reasons: list[str] = []
+        profile_unparsed = evaluation_details.get("profile_unparsed") is True
+        if profile_unparsed:
+            reasons.append(
+                "No CV sections could be recognized, so the score is unreliable; "
+                "HR should read the CV."
+            )
         if resume.score < settings.email_automation_reject_below_score:
             reasons.append(
                 f"CV score {resume.score}% is below "
@@ -145,7 +151,7 @@ def apply_resume_score_outcome(
         ):
             reasons.append("The evaluation found no relevant CV evidence for this job.")
         application.agent_review_reason = " ".join(reasons)
-        if settings.email_automation_auto_reject:
+        if settings.email_automation_auto_reject and not profile_unparsed:
             # Irrelevant CV or score below the threshold: reject and tell the
             # candidate. The reason stays on the application as an audit trail.
             application.status = "rejected"

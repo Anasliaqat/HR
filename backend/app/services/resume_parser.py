@@ -44,7 +44,9 @@ _SECTION_HEADINGS: dict[Section, re.Pattern[str]] = {
         re.I,
     ),
     "skills": re.compile(
-        r"^(?:(?:technical\s+)?skills(?:\s+and\s+tools)?|core\s+strengths|"
+        r"^(?:(?:technical\s+|key\s+)?skills(?:\s+(?:and|&)\s+tools)?|"
+        r"core\s+strengths|core\s+competenc(?:y|ies)|areas?\s+of\s+expertise|"
+        r"technical\s+(?:expertise|proficiency|proficiencies)|"
         r"ai\s*/?\s*ml|machine\s+learning|programming|programming\s+languages|"
         r"databases?|development|tools|technologies|technical\s+stack|"
         r"frameworks?|libraries|platforms)"
@@ -52,20 +54,24 @@ _SECTION_HEADINGS: dict[Section, re.Pattern[str]] = {
         re.I,
     ),
     "education": re.compile(
-        r"^(?:education|academic\s+background)(?:\s*[:|\-]\s*(.*))?$", re.I
+        r"^(?:education(?:al)?(?:\s+(?:background|qualifications?))?|"
+        r"academic\s+(?:background|qualifications?)|qualifications)"
+        r"(?:\s*[:|\-]\s*(.*))?$",
+        re.I,
     ),
     "experience": re.compile(
-        r"^(?:(?:work\s+)?(?:professional\s+)?experience|employment\s+history)"
+        r"^(?:(?:work\s+)?(?:professional\s+)?experience|employment\s+history|"
+        r"work\s+history|career\s+history|professional\s+background|internships?)"
         r"(?:\s*[:|\-]\s*(.*))?$",
         re.I,
     ),
     "projects": re.compile(
-        r"^(?:(?:selected\s+)?projects?|project\s+experience)"
+        r"^(?:(?:(?:selected|personal|academic|key)\s+)?projects?|project\s+experience)"
         r"(?:\s*[:|\-]\s*(.*))?$",
         re.I,
     ),
     "certifications": re.compile(
-        r"^(?:certifications?|licenses?\s+and\s+certifications?|training)"
+        r"^(?:certifications?|certificates?|licenses?\s+and\s+certifications?|training)"
         r"(?:\s*[:|\-]\s*(.*))?$",
         re.I,
     ),

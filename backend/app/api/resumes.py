@@ -220,6 +220,9 @@ def _score_and_store_resume(
     )
     details["job_id"] = str(job.id)
     details["job_title"] = job.title
+    # No recognizable CV sections: the 0% score reflects a parsing gap, not an
+    # irrelevant candidate, so the email agent must not auto-reject on it.
+    details["profile_unparsed"] = not any(profile.model_dump().values())
     resume.score = result.score
     resume.extracted_text = extracted_text
     resume.extracted_skills = profile.skills

@@ -42,3 +42,19 @@ def test_docx_sections_and_skill_table_are_extracted_into_their_sections(
     assert profile.certifications == ["AI and Machine Learning Training"]
     assert any("AI assistant with RAG" in line for line in profile.projects)
     assert "Problem solving" in profile.skills[0]
+
+
+def test_common_alternative_cv_headings_are_recognized() -> None:
+    profile = extract_profile(
+        "Technical Expertise\nPython, FastAPI\n"
+        "Work History\nBackend Engineer at Acme\n"
+        "Academic Qualifications\nBSc Computer Science\n"
+        "Personal Projects\nHR screening bot\n"
+        "Certificates\nAWS Cloud Practitioner\n"
+    )
+
+    assert profile.skills == ["Python", "FastAPI"]
+    assert profile.experience == ["Backend Engineer at Acme"]
+    assert profile.education == ["BSc Computer Science"]
+    assert profile.projects == ["HR screening bot"]
+    assert profile.certifications == ["AWS Cloud Practitioner"]

@@ -725,10 +725,15 @@ def seed_application_via_api(
     score: int,
     consent: bool,
     details: dict | None = None,
+    phone: str | None = None,
 ) -> tuple[str, str]:
     candidate_id = api_client.post(
         "/api/candidates",
-        json={"full_name": "Taylor Candidate", "email": "taylor@example.com"},
+        json={
+            "full_name": "Taylor Candidate",
+            "email": "taylor@example.com",
+            "phone": phone,
+        },
     ).json()["id"]
     if consent:
         api_client.put(
@@ -852,3 +857,141 @@ def test_hr_can_override_an_automatic_rejection(
     assert decision.json()["email"]["email_type"] == "selection"
     assert decision.json()["email"]["status"] == "sent"
     assert sent_to == ["taylor@example.com", "taylor@example.com"]
+
+
+def score_cv_text(
+    db: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cv_text: str,
+    *,
+    similarity: float,
+) -> tuple[Application, ResumeEvaluation]:
+    """Run a CV file through the real parsing and scoring pipeline."""
+    from app.agents import resume_agent
+    from app.api import resumes as resumes_api
+
+    monkeypatch.setattr(resume_agent, "semantic_similarity", lambda *_a: similarity)
+    application, resume = create_application(db, score=0, email_consent=True)
+    cv_file = tmp_path / "cv.txt"
+    cv_file.write_text(cv_text, encoding="utf-8")
+    resume.file_path = str(cv_file)
+    resume.score = None
+    resume.evaluation_details = None
+    db.commit()
+    resumes_api._score_and_store_resume(db, resume, db.get(Job, application.job_id))
+    db.refresh(application)
+    return application, resume
+
+
+def test_cv_with_no_recognizable_sections_goes_to_hr_not_auto_rejected(
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent_to = stub_delivery(monkeypatch)
+
+    application, resume = score_cv_text(
+        db_session,
+        tmp_path,
+        monkeypatch,
+        "Taylor Candidate\nI build Python APIs and have five years of experience.\n",
+        similarity=0.0,
+    )
+
+    assert resume.score == 0
+    assert resume.evaluation_details["profile_unparsed"] is True
+    assert application.status == "over_agent_review"
+    assert "No CV sections could be recognized" in application.agent_review_reason
+    assert db_session.scalar(select(EmailLog)) is None
+    assert sent_to == []
+
+
+def test_relevant_cv_with_alternative_headings_is_not_rejected(
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent_to = stub_delivery(monkeypatch)
+
+    application, resume = score_cv_text(
+        db_session,
+        tmp_path,
+        monkeypatch,
+        "Taylor Candidate\n\nTechnical Expertise\nPython, FastAPI, Docker\n\n"
+        "Work History\nBackend Engineer at Acme, 3 years building Python APIs\n",
+        similarity=0.8,
+    )
+
+    assert resume.evaluation_details["profile_unparsed"] is False
+    assert resume.evaluation_details["matched_skills"] == ["Python"]
+    assert resume.score >= 50
+    assert application.status == "pending_review"
+    assert sent_to == []
+
+
+def test_full_screening_call_flow_after_automatic_invitation(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent_to = stub_delivery(monkeypatch)
+    for key, value in {
+        "vapi_webhook_secret": "secret",
+        "vapi_assistant_id": "assistant-1",
+        "vapi_public_phone_number": "+14055541013",
+        "phone_default_region": "PK",
+        "openai_api_key": "",
+    }.items():
+        monkeypatch.setattr(settings, key, value)
+    candidate_id, application_id = seed_application_via_api(
+        api_client, score=82, consent=True, phone="0300 1234567"
+    )
+
+    # 1. The CV score triggers the screening invitation email automatically.
+    assert sent_to == ["taylor@example.com"]
+    history = api_client.get("/api/email-automation/history").json()
+    assert [(item["email_type"], item["status"]) for item in history] == [
+        ("screening_invitation", "sent")
+    ]
+    assert "+14055541013" in history[0]["body"]
+
+    # 2. The candidate phones the Vapi number and is matched to the application.
+    webhook = "/api/screening/webhook"
+    headers = {"x-vapi-secret": "secret"}
+    call = {"id": "call-1", "customer": {"number": "+923001234567"}}
+    answer = api_client.post(
+        webhook,
+        json={"message": {"type": "assistant-request", "call": call}},
+        headers=headers,
+    )
+    assert answer.json() == {"assistantId": "assistant-1"}
+    records = api_client.get("/api/screening").json()
+    assert [(r["application_id"], r["status"]) for r in records] == [
+        (application_id, "queued")
+    ]
+
+    # 3. The end-of-call report records verified consent, transcript and status.
+    transcript = (
+        "AI: Hello. Do you consent to continue with the screening?\n"
+        "User: Yes, I consent.\n"
+        "AI: Can you briefly introduce yourself?\n"
+        "User: I am Taylor, a backend engineer."
+    )
+    report = api_client.post(
+        webhook,
+        json={
+            "message": {
+                "type": "end-of-call-report",
+                "endedReason": "customer-ended-call",
+                "call": call,
+                "artifact": {"transcript": transcript},
+            }
+        },
+        headers=headers,
+    )
+    assert report.status_code == 200
+    record = api_client.get(f"/api/screening/{candidate_id}").json()
+    assert record["status"] == "completed"
+    assert record["consent_confirmed_on_call"] is True
+    assert record["transcript"] == transcript
+    assert "Automated summarization is not configured" in record["summary"]
