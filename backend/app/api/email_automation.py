@@ -305,6 +305,7 @@ def preview_application_email(
     elif email_type == "rejection" and application.status not in {
         "rejected",
         "rejected_by_hr",
+        "rejected_by_agent",
     }:
         reason = "Record a rejection decision before sending this email."
     elif email_type == "selection" and application.status != "approved_by_hr":

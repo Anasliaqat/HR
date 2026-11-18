@@ -85,7 +85,7 @@ def create_application(
 @pytest.mark.parametrize(
     ("score", "expected"),
     [
-        (49, "agent_review"),
+        (49, "auto_reject"),
         (50, "hr_review"),
         (60, "hr_review"),
         (61, "hr_decision"),
@@ -110,21 +110,33 @@ def test_missing_match_evidence_does_not_count_as_no_skill_match() -> None:
     ) == "hr_review"
 
 
-def test_low_score_routes_to_agent_review_without_sending_email(
+def test_low_score_auto_rejects_and_sends_rejection_email(
     db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    application, resume = create_application(db_session, score=42)
+    application, resume = create_application(
+        db_session, score=42, email_consent=True
+    )
+    monkeypatch.setattr(
+        email_automation_service,
+        "_deliver",
+        lambda *_args, **_kwargs: "rejection-message-id",
+    )
 
     apply_resume_score_outcome(db_session, resume)
 
     db_session.refresh(application)
-    assert application.status == "over_agent_review"
+    assert application.status == "rejected_by_agent"
     assert "42%" in application.agent_review_reason
     assert "below" in application.agent_review_reason
-    assert db_session.scalar(select(EmailLog)) is None
+    email_log = db_session.scalar(select(EmailLog))
+    assert email_log is not None
+    assert email_log.email_type == "rejection"
+    assert email_log.status == "sent"
+    assert email_log.provider_message_id == "rejection-message-id"
 
     apply_resume_score_outcome(db_session, resume)
-    assert len(db_session.scalars(select(EmailLog)).all()) == 0
+    assert len(db_session.scalars(select(EmailLog)).all()) == 1
 
 
 def test_review_score_stays_pending_without_sending_email(
@@ -194,9 +206,10 @@ def test_no_required_skill_match_routes_to_agent_review_without_email(
 
     db_session.refresh(application)
     email_log = db_session.scalar(select(EmailLog))
-    assert application.status == "over_agent_review"
+    assert application.status == "rejected_by_agent"
     assert "No required job skills were matched" in application.agent_review_reason
-    assert email_log is None
+    assert email_log is not None
+    assert email_log.email_type == "rejection"
 
 
 def test_explicitly_empty_relevance_evidence_routes_to_agent_review(
@@ -214,9 +227,11 @@ def test_explicitly_empty_relevance_evidence_routes_to_agent_review(
     apply_resume_score_outcome(db_session, resume)
 
     db_session.refresh(application)
-    assert application.status == "over_agent_review"
+    assert application.status == "rejected_by_agent"
     assert "no relevant CV evidence" in application.agent_review_reason
-    assert db_session.scalar(select(EmailLog)) is None
+    email_log = db_session.scalar(select(EmailLog))
+    assert email_log is not None
+    assert email_log.email_type == "rejection"
 
 
 def test_missing_relevance_evidence_is_not_assumed_irrelevant(

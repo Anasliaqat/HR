@@ -264,6 +264,7 @@ def send_application_email(
     elif email_type == "rejection" and application.status not in {
         "rejected",
         "rejected_by_hr",
+        "rejected_by_agent",
     }:
         raise EmailAutomationError(
             "A rejection email requires a recorded rejection decision."
