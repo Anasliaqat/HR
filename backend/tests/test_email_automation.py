@@ -110,10 +110,18 @@ def test_missing_match_evidence_does_not_count_as_no_skill_match() -> None:
     ) == "hr_review"
 
 
-def test_low_score_auto_rejects_and_attempts_rejection_email(
+def test_low_score_auto_rejects_and_sends_rejection_email(
     db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    application, resume = create_application(db_session, score=42)
+    application, resume = create_application(
+        db_session, score=42, email_consent=True
+    )
+    monkeypatch.setattr(
+        email_automation_service,
+        "_deliver",
+        lambda *_args, **_kwargs: "rejection-message-id",
+    )
 
     apply_resume_score_outcome(db_session, resume)
 
@@ -124,8 +132,8 @@ def test_low_score_auto_rejects_and_attempts_rejection_email(
     email_log = db_session.scalar(select(EmailLog))
     assert email_log is not None
     assert email_log.email_type == "rejection"
-    assert email_log.status == "pending"
-    assert email_log.error_message == email_automation_service.CONSENT_REQUIRED
+    assert email_log.status == "sent"
+    assert email_log.provider_message_id == "rejection-message-id"
 
     apply_resume_score_outcome(db_session, resume)
     assert len(db_session.scalars(select(EmailLog)).all()) == 1
@@ -185,7 +193,7 @@ def test_eligible_score_sends_consent_gated_screening_invitation(
     assert "assistant's instructions" in email_log.body
 
 
-def test_no_required_skill_match_routes_to_agent_review_without_email(
+def test_no_required_skill_match_auto_rejects_with_email(
     db_session: Session,
 ) -> None:
     application, resume = create_application(
@@ -204,7 +212,7 @@ def test_no_required_skill_match_routes_to_agent_review_without_email(
     assert email_log.email_type == "rejection"
 
 
-def test_explicitly_empty_relevance_evidence_routes_to_agent_review(
+def test_explicitly_empty_relevance_evidence_auto_rejects(
     db_session: Session,
 ) -> None:
     application, resume = create_application(db_session, score=65)
