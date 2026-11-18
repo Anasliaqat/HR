@@ -27,6 +27,8 @@ AI output is advisory. HR must review and approve candidates before they advance
 
 ## Backend setup
 
+The easiest local setup uses SQLite, so Docker and PostgreSQL are **not required** for development or testing.
+
 From the project root, create and activate a virtual environment:
 
 ```powershell
@@ -38,35 +40,29 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Edit `backend/.env` and set a non-empty `POSTGRES_PASSWORD` and `DATABASE_URL`. Use URL-encoded credentials if the password contains reserved URL characters. Set `DATABASE_URL` using this format, replacing the placeholders:
+The supplied `backend/.env.example` uses a local SQLite database and enables safe scheduling test mode. Start the API from the `backend/` directory:
 
-```text
-postgresql+psycopg://<user>:<url-encoded-password>@localhost:5432/<database>
+```powershell
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-For Vapi screening, set `VAPI_API_KEY`, `VAPI_ASSISTANT_ID`,
-`VAPI_PHONE_NUMBER_ID`, `VAPI_PUBLIC_PHONE_NUMBER`, `PHONE_DEFAULT_REGION`,
-and a long random `VAPI_WEBHOOK_SECRET` in `backend/.env`. These are
-server-side settings only; never put the private key or webhook secret in the
-React environment.
+Open `http://127.0.0.1:8000/docs` for the interactive API documentation. The `/health` endpoint checks both the API and its database connection; it returns HTTP 503 when the database cannot be reached.
 
-Start PostgreSQL from the project root, loading the backend environment file for Compose variable substitution:
+### Optional PostgreSQL setup
+
+For PostgreSQL, set `DATABASE_URL` in `backend/.env` to a valid SQLAlchemy URL, for example:
+
+```text
+postgresql+psycopg://hr_user:YOUR_URL_ENCODED_PASSWORD@localhost:5432/hr_hiring
+```
+
+Set a strong `POSTGRES_PASSWORD` in `backend/.env`, then start PostgreSQL from the project root:
 
 ```powershell
 docker compose --env-file backend/.env up -d db
 ```
 
-Start the API from the `backend/` directory. On startup, SQLAlchemy creates missing tables for all registered models:
-
-```powershell
-uvicorn app.main:app --reload
-```
-
-The API is available at `http://127.0.0.1:8000`; interactive API documentation is at `http://127.0.0.1:8000/docs`.
-
-Jobs, candidates, applications, resume metadata/evaluations, screenings, interviews, users, email logs, and agent runs are represented by SQLAlchemy models. API records are stored in PostgreSQL; uploaded resume files are saved in `backend/uploads/`. The `memory_store.py` module remains for compatibility but is no longer used by the API. Resume scoring is advisory and requires HR review; it does not automatically reject candidates or approve them.
-
-The local PostgreSQL service must be running before starting the API. From the project root, start it with `docker compose --env-file backend/.env up -d db`, then run `uvicorn app.main:app --reload --host 127.0.0.1 --port 8000` from `backend/`. The backend serves the `/api` prefix and allows the Vite origins `http://localhost:5173` and `http://127.0.0.1:5173`. The frontend API base URL is centralized in `frontend/src/services/api.js` and can be overridden with `VITE_API_BASE_URL` in `frontend/.env`.
+Do not commit `.env`, credentials, database files, uploaded resumes, or service-account keys. Keep `SCHEDULING_TEST_MODE=true` until Google Calendar and email integrations have been configured and deliberately tested.
 
 ## ZETECH email automation
 
