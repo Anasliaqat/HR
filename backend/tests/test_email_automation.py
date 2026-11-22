@@ -370,8 +370,6 @@ def api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         f"sqlite:///{tmp_path / 'email-api.db'}",
     )
     for key in (
-        "resend_api_key",
-        "email_from_address",
         "smtp_host",
         "smtp_from_email",
         "smtp_user",
