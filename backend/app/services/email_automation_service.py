@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import smtplib
+import ssl
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.message import EmailMessage
@@ -10,7 +11,6 @@ from typing import Literal
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -19,14 +19,11 @@ from app.config import settings
 from app.models.application import Application
 from app.models.email_log import EmailLog
 from app.models.interview import Interview
-from app.services.phone_service import normalize_phone_number
 
 logger = logging.getLogger(__name__)
-RESEND_EMAILS_URL = "https://api.resend.com/emails"
 EmailType = Literal[
     "rejection",
     "selection",
-    "screening_invitation",
     "interview_invitation",
 ]
 CONSENT_REQUIRED = "Candidate email consent has not been recorded."
@@ -81,35 +78,6 @@ def build_email_preview(
             "Congratulations, and thank you for your interest in ZETECH.\n\n"
             "Best Regards,\nHR Team\nZETECH"
         )
-    elif email_type == "screening_invitation":
-        if not settings.vapi_public_phone_number:
-            raise EmailAutomationError(
-                "Configure VAPI_PUBLIC_PHONE_NUMBER before inviting candidates to screening."
-            )
-        if normalize_phone_number(
-            settings.vapi_public_phone_number, settings.phone_default_region
-        ) is None:
-            raise EmailAutomationError(
-                "VAPI_PUBLIC_PHONE_NUMBER must be a valid international phone number."
-            )
-        if normalize_phone_number(
-            candidate.phone, settings.phone_default_region
-        ) is None:
-            raise EmailAutomationError(
-                "A valid candidate phone number is required for screening."
-            )
-        subject = f"Next Step for Your {job.title} Application"
-        body = (
-            f"Dear {candidate.full_name},\n\n"
-            f"Thank you for applying for the {job.title} position at ZETECH. "
-            "Your CV has been reviewed and we invite you to complete an initial "
-            "AI-assisted screening.\n\n"
-            f"Please call {settings.vapi_public_phone_number} and follow the "
-            "assistant's instructions. The assistant will explain the screening "
-            "and ask for your consent before proceeding. You may decline or end "
-            "the call at any time.\n\n"
-            "Best Regards,\nHR Team\nZETECH"
-        )
     else:
         if interview is None:
             raise EmailAutomationError("Select a confirmed interview for this email.")
@@ -158,81 +126,56 @@ def _idempotency_key(
     return f"application-{application.id}-{email_type}"
 
 
-def _deliver(preview: EmailPreview, idempotency_key: str) -> str | None:
-    smtp_configured = bool(settings.smtp_host)
-    resend_configured = bool(settings.resend_api_key)
-    if smtp_configured:
-        from_address = settings.smtp_from_email or settings.email_from_address
-        if not from_address:
-            raise EmailAutomationError(
-                "Configure SMTP_FROM_EMAIL or EMAIL_FROM_ADDRESS for SMTP delivery."
-            )
-        message = EmailMessage()
-        message["From"] = from_address
-        message["To"] = preview.recipient_email
-        message["Subject"] = preview.subject
-        message["Message-ID"] = (
-            f"<{hashlib.sha256(idempotency_key.encode()).hexdigest()}@zetech.local>"
+def _deliver(preview: EmailPreview, idempotency_key: str) -> str:
+    """Send one message through an authenticated SMTP account (Gmail supported)."""
+    if not settings.smtp_host or not settings.smtp_user or not settings.smtp_password:
+        raise EmailAutomationError(
+            "Configure SMTP_HOST, SMTP_USER, and SMTP_PASSWORD. For Gmail, use a Google App Password."
         )
-        message.set_content(preview.body)
-        try:
+
+    from_address = settings.smtp_from_email or settings.smtp_user
+    message = EmailMessage()
+    message["From"] = from_address
+    message["To"] = preview.recipient_email
+    message["Subject"] = preview.subject
+    message["Message-ID"] = (
+        f"<{hashlib.sha256(idempotency_key.encode()).hexdigest()}@zetech.local>"
+    )
+    message.set_content(preview.body)
+
+    try:
+        if settings.smtp_port == 465:
+            with smtplib.SMTP_SSL(
+                settings.smtp_host,
+                settings.smtp_port,
+                timeout=20,
+                context=ssl.create_default_context(),
+            ) as client:
+                client.login(settings.smtp_user, settings.smtp_password)
+                client.send_message(message)
+        else:
             with smtplib.SMTP(
                 settings.smtp_host,
                 settings.smtp_port,
                 timeout=20,
             ) as client:
-                client.starttls()
-                if settings.smtp_user:
-                    if not settings.smtp_password:
-                        raise EmailAutomationError(
-                            "SMTP_PASSWORD is required when SMTP_USER is configured."
-                        )
-                    client.login(settings.smtp_user, settings.smtp_password)
+                client.ehlo()
+                client.starttls(context=ssl.create_default_context())
+                client.ehlo()
+                client.login(settings.smtp_user, settings.smtp_password)
                 client.send_message(message)
-        except (OSError, smtplib.SMTPException) as exc:
-            logger.warning("SMTP recruiting email delivery failed.")
-            raise EmailAutomationError("SMTP could not deliver the recruiting email.") from exc
-        return message["Message-ID"]
+    except smtplib.SMTPAuthenticationError as exc:
+        logger.warning("SMTP recruiting email authentication failed.")
+        raise EmailAutomationError(
+            "Gmail SMTP authentication failed. Check SMTP_USER and use a Google App Password in SMTP_PASSWORD."
+        ) from exc
+    except (OSError, smtplib.SMTPException) as exc:
+        logger.warning("SMTP recruiting email delivery failed.")
+        raise EmailAutomationError(
+            "SMTP could not deliver the recruiting email. Check the SMTP host, port, and account settings."
+        ) from exc
 
-    if not resend_configured or not settings.email_from_address:
-        raise EmailAutomationError(
-            "Configure RESEND_API_KEY and EMAIL_FROM_ADDRESS, or SMTP_HOST and a sender address."
-        )
-    try:
-        response = httpx.post(
-            RESEND_EMAILS_URL,
-            headers={
-                "Authorization": f"Bearer {settings.resend_api_key}",
-                "Content-Type": "application/json",
-                "Idempotency-Key": idempotency_key,
-            },
-            json={
-                "from": settings.email_from_address,
-                "to": [preview.recipient_email],
-                "subject": preview.subject,
-                "text": preview.body,
-            },
-            timeout=20.0,
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except httpx.HTTPStatusError as exc:
-        logger.error(
-            "Resend recruiting email request failed with HTTP %s",
-            exc.response.status_code,
-        )
-        raise EmailAutomationError(
-            "Resend rejected the recruiting email."
-        ) from exc
-    except (httpx.RequestError, ValueError) as exc:
-        logger.error("Resend recruiting email request failed.")
-        raise EmailAutomationError(
-            "Resend could not deliver the recruiting email."
-        ) from exc
-    message_id = payload.get("id") if isinstance(payload, dict) else None
-    if not isinstance(message_id, str):
-        raise EmailAutomationError("Resend returned no email ID.")
-    return message_id
+    return message["Message-ID"]
 
 
 def send_application_email(
@@ -250,6 +193,10 @@ def send_application_email(
             "Candidate emails are disabled until HR decides an Over Agent Review application."
         )
     if email_type == "interview_invitation":
+        if application.status != "approved_by_hr":
+            raise EmailAutomationError(
+                "An interview invitation requires recorded HR approval."
+            )
         if (
             interview is None
             or interview.status != "scheduled"
@@ -271,13 +218,6 @@ def send_application_email(
     elif email_type == "selection" and application.status != "approved_by_hr":
         raise EmailAutomationError(
             "A selection email requires a recorded HR approval."
-        )
-    elif email_type == "screening_invitation" and application.status not in {
-        "interview_eligible",
-        "approved_by_hr",
-    }:
-        raise EmailAutomationError(
-            "A screening invitation requires a CV-eligible application."
         )
 
     preview = build_email_preview(application, email_type, interview)

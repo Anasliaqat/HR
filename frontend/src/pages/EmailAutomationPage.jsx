@@ -14,7 +14,6 @@ import {
 const emailTypes = [
   { value: "rejection", label: "Rejection" },
   { value: "selection", label: "CV approved / selection" },
-  { value: "screening_invitation", label: "AI screening invitation" },
   { value: "interview_invitation", label: "Interview invitation" },
 ];
 
@@ -83,7 +82,7 @@ export default function EmailAutomationPage() {
   const latestEmail = selected?.emails?.[0];
   const canDecide =
     selected?.application_status === "pending_review" &&
-    ["hr_review", "hr_decision"].includes(selected?.score_action);
+    selected?.score_action === "hr_review";
 
   function chooseApplication(id) {
     setSelectedId(id);
@@ -130,6 +129,28 @@ export default function EmailAutomationPage() {
         record.status === "sent"
           ? `Email sent to ${record.recipient_email}.`
           : `Email status: ${record.status}.${record.error_message ? ` ${record.error_message}` : ""}`,
+      );
+      setPreview(null);
+      await loadData();
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function decideApplication(application, decision) {
+    const verb = decision === "approve" ? "accept" : "reject";
+    if (!window.confirm(`${verb[0].toUpperCase()}${verb.slice(1)} ${application.candidate_name}? This records the HR decision and attempts the matching email.`)) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const record = await api.recordEmailDecision(application.application_id, decision);
+      setNotice(
+        record.status === "sent"
+          ? `HR ${verb} recorded. Email sent to ${record.recipient_email}.`
+          : `HR ${verb} recorded. Email status: ${record.status}.${record.error_message ? ` ${record.error_message}` : ""}`,
       );
       setPreview(null);
       await loadData();
@@ -234,76 +255,6 @@ export default function EmailAutomationPage() {
       />
       <ErrorMessage>{error}</ErrorMessage>
       {notice && <p className="form-note email-notice" role="status">{notice}</p>}
-      <Panel
-        className="table-panel"
-        title={`Over Agent Review (${reviewQueue.length})`}
-        subtitle="Flagged CVs require an explicit HR decision. Only that manual decision attempts the matching email."
-      >
-        {reviewQueue.length === 0 ? (
-          <EmptyState title="No applications are waiting for agent review">
-            Low-scoring, irrelevant, and no-required-skill-match CVs will appear here.
-          </EmptyState>
-        ) : (
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Candidate</th>
-                  <th>Job title</th>
-                  <th>CV score</th>
-                  <th>Matched skills</th>
-                  <th>Missing skills</th>
-                  <th>Reason for flagging</th>
-                  <th>HR decision</th>
-                </tr>
-              </thead>
-              <tbody>
-                {reviewQueue.map((application) => (
-                  <tr key={application.application_id}>
-                    <td>
-                      <strong>{application.candidate_name}</strong>
-                      <small>{application.recipient_email}</small>
-                    </td>
-                    <td>{application.job_title}</td>
-                    <td>
-                      {application.cv_score == null
-                        ? "—"
-                        : `${application.cv_score}%`}
-                    </td>
-                    <td>{application.matched_skills.join(", ") || "None"}</td>
-                    <td>{application.missing_skills.join(", ") || "None"}</td>
-                    <td>{application.reason}</td>
-                    <td>
-                      <div className="form-actions">
-                        <button
-                          type="button"
-                          className="button button-primary button-small"
-                          disabled={busy}
-                          onClick={() =>
-                            decideAgentReview(application, "approve")
-                          }
-                        >
-                          Approve
-                        </button>
-                        <button
-                          type="button"
-                          className="button button-secondary button-small"
-                          disabled={busy}
-                          onClick={() =>
-                            decideAgentReview(application, "reject")
-                          }
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Panel>
       {loading && applications.length === 0 ? (
         <LoadingState label="Loading email automation…" />
       ) : applications.length === 0 ? (
@@ -322,11 +273,13 @@ export default function EmailAutomationPage() {
                     <th>Candidate</th>
                     <th>Job title</th>
                     <th>CV score</th>
+                    <th>CV summary</th>
                     <th>Email type</th>
                     <th>Recipient email</th>
                     <th>Sending status</th>
                     <th>Sent date and time</th>
-                    <th>Actions</th>
+                    <th>HR decision</th>
+                    <th>Email history</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -355,12 +308,25 @@ export default function EmailAutomationPage() {
                         </td>
                         <td>{application.job_title}</td>
                         <td>{application.cv_score == null ? "—" : `${application.cv_score}%`}</td>
+                        <td className="cv-summary-cell">{application.cv_summary || "Summary is not available yet."}</td>
                         <td>{latest ? labelForEmail(latest.email_type) : "—"}</td>
                         <td>{application.recipient_email}</td>
                         <td>
                           <StatusBadge>{latest?.status ?? "not sent"}</StatusBadge>
                         </td>
                         <td>{formatDate(latest?.sent_at)}</td>
+                        <td>
+                          {application.application_status === "pending_review" && application.score_action === "hr_review" ? (
+                            <div className="form-actions">
+                              <button type="button" className="button button-primary button-small" disabled={busy} onClick={() => decideApplication(application, "approve")}>Accept</button>
+                              <button type="button" className="button button-secondary button-small" disabled={busy} onClick={() => decideApplication(application, "reject")}>Reject</button>
+                            </div>
+                          ) : application.score_action === "automatic_rejection" ? (
+                            <span className="muted-copy">Auto-rejection workflow</span>
+                          ) : (
+                            <span className="muted-copy">No HR action required</span>
+                          )}
+                        </td>
                         <td>
                           {application.emails.length > 0 && (
                             <button
@@ -389,6 +355,7 @@ export default function EmailAutomationPage() {
                 title="Review and prepare email"
                 subtitle={`${selected.candidate_name} · ${selected.job_title} · ${selected.cv_score == null ? "No CV score" : `${selected.cv_score}% CV score`}`}
               >
+                {selected.cv_summary && <div className="email-cv-summary"><strong>AI CV summary for HR</strong><p>{selected.cv_summary}</p><p><strong>Matched skills:</strong> {selected.matched_skills.join(", ") || "None recorded"}</p><p><strong>Missing required skills:</strong> {selected.missing_skills.join(", ") || "None recorded"}</p></div>}
                 <p className="email-consent-summary">
                   Candidate email consent:{" "}
                   <StatusBadge>

@@ -125,11 +125,21 @@ export default function JobsPage() {
 
   async function submitJob(event) {
     event.preventDefault();
+    if (saving) return;
+
+    const title = form.title.trim();
+    const description = form.description.trim();
+    if (title.length < 2 || !description) {
+      setError("Please enter a job title (at least 2 characters) and a job description.");
+      return;
+    }
+
     setSaving(true);
     setError("");
+    setSuccess("");
     const payload = {
-      title: form.title.trim(),
-      description: form.description.trim(),
+      title,
+      description,
       department: form.department.trim() || null,
       location: form.location.trim() || null,
       employment_type: form.employment_type.trim() || null,
@@ -232,7 +242,12 @@ export default function JobsPage() {
         </select>
       </div>
       {showForm && (
-        <div className="modal-backdrop job-form-backdrop" onClick={resetForm}>
+        <div
+          className="modal-backdrop job-form-backdrop"
+          onClick={() => {
+            if (!saving) resetForm();
+          }}
+        >
           <section
           className="job-form-dialog"
           role="dialog"
@@ -250,12 +265,18 @@ export default function JobsPage() {
               className="icon-button"
               aria-label="Close form"
               onClick={resetForm}
+              disabled={saving}
             >
               <X size={18} />
             </button>
           }
           >
           <form className="form-grid" onSubmit={submitJob}>
+            {error && (
+              <div className="error-banner form-full" role="alert">
+                {error}
+              </div>
+            )}
             <span className="visually-hidden" id="job-form-title">
               {editingId ? "Edit vacancy" : "Create a vacancy"}
             </span>
@@ -399,6 +420,7 @@ export default function JobsPage() {
                 type="button"
                 className="button button-secondary"
                 onClick={resetForm}
+                disabled={saving}
               >
                 Cancel
               </button>

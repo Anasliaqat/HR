@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,7 +15,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_v1_prefix: str = "/api"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
-    database_url: str = ""
+    database_url: str = "sqlite:///./hr_hiring_local.db"
     openai_api_key: str = ""
     vapi_api_key: str = ""
     vapi_assistant_id: str = ""
@@ -30,8 +31,6 @@ class Settings(BaseSettings):
     google_calendar_credentials_file: str = ""
     google_calendar_time_zone: str = "UTC"
     scheduling_test_mode: bool = True
-    resend_api_key: str = ""
-    email_from_address: str = ""
     email_automation_reject_below_score: int = 50
     email_automation_review_through_score: int = 60
     email_automation_interview_from_score: int = 70
@@ -39,6 +38,11 @@ class Settings(BaseSettings):
     email_automation_above_range_action: Literal[
         "pending_review", "interview_eligible"
     ] = "pending_review"
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def default_local_database(cls, value: str | None) -> str:
+        return value.strip() if isinstance(value, str) and value.strip() else "sqlite:///./hr_hiring_local.db"
 
     model_config = SettingsConfigDict(
         env_file=BACKEND_ENV_FILE,
