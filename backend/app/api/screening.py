@@ -38,6 +38,7 @@ from app.security import require_candidate
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/screening", tags=["screening"])
+webhook_router = APIRouter(prefix="/screening", tags=["ElevenLabs webhooks"])
 
 _IN_PROGRESS_STATUSES = {"queued", "ringing", "in_progress"}
 _ELEVENLABS_STATUS_MAP = {
@@ -401,7 +402,7 @@ def _transcript_text(turns: object) -> str:
     return "\n".join(lines)
 
 
-@router.post("/webhook", response_model=None)
+@webhook_router.post("/webhook", response_model=None)
 async def elevenlabs_webhook(
     request: Request,
     db: Session = Depends(get_db),
@@ -472,6 +473,8 @@ async def elevenlabs_webhook(
     transcript = _transcript_text(data.get("transcript"))
     if transcript:
         screening.consent_confirmed_on_call = candidate_consented_on_call(transcript)
+        if screening.consent_confirmed_on_call is True:
+            screening.consent_obtained_at = datetime.now(timezone.utc)
         screening.transcript = (
             transcript[:50_000]
             if screening.consent_confirmed_on_call is True
