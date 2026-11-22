@@ -1,20 +1,23 @@
-"""HR-initiated Vapi screening calls and authenticated result webhooks."""
+"""HR-initiated ElevenLabs screening calls and authenticated result webhooks."""
 
 import hmac
+import hashlib
+import json
+import time
 import logging
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.agents.screening_agent import (
     ScreeningSummary,
-    build_vapi_call_payload,
+    build_elevenlabs_call_payload,
     candidate_consented_on_call,
     summarize_screening,
 )
@@ -31,17 +34,18 @@ from app.schemas.screening import (
     ScreeningStartRequest,
 )
 from app.services.phone_service import normalize_phone_number
-from app.services.voice_service import VapiServiceError, create_outbound_call
+from app.services.voice_service import ElevenLabsServiceError, create_outbound_call
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/screening", tags=["screening"])
 
 _IN_PROGRESS_STATUSES = {"queued", "ringing", "in_progress"}
-_VAPI_STATUS_MAP = {
+_ELEVENLABS_STATUS_MAP = {
     "scheduled": "queued",
     "queued": "queued",
     "ringing": "ringing",
     "in-progress": "in_progress",
+    "in_progress": "in_progress",
     "in_progress": "in_progress",
 }
 _FAILED_END_REASONS = (
@@ -162,10 +166,10 @@ def _handle_assistant_request(
     call: dict[str, Any],
     db: Session,
 ) -> dict[str, Any]:
-    if not settings.vapi_assistant_id:
+    if not settings.elevenlabs_assistant_id:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="VAPI_ASSISTANT_ID is not configured",
+            detail="ELEVENLABS_ASSISTANT_ID is not configured",
         )
 
     call_id = call.get("id")
@@ -211,7 +215,7 @@ def _handle_assistant_request(
                         raise
         else:
             logger.info(
-                "Inbound Vapi call is not uniquely attributable; no candidate context was provided."
+                "Inbound ElevenLabs call is not uniquely attributable; no candidate context was provided."
             )
     return {"assistantId": settings.vapi_assistant_id}
 
@@ -297,7 +301,7 @@ def start_screening(
 
     try:
         call = create_outbound_call(
-            build_vapi_call_payload(candidate, job, str(screening.id))
+            build_elevenlabs_call_payload(candidate, job, str(screening.id))
         )
     except (VapiServiceError, ValueError, RuntimeError) as exc:
         screening.call_status = "failed"
@@ -312,7 +316,7 @@ def start_screening(
             detail=str(exc),
         ) from exc
 
-    screening.call_id = call["id"]
+    screening.call_id = call["conversation_id"]
     returned_status = call.get("status")
     if isinstance(returned_status, str):
         screening.call_status = _VAPI_STATUS_MAP.get(
@@ -356,161 +360,167 @@ def get_screening_record(
     return _dashboard_response(screening)
 
 
+def _verify_elevenlabs_signature(raw_body: bytes, signature: str | None) -> bool:
+    """Verify ElevenLabs HMAC signature and reject stale webhook deliveries."""
+    if not settings.elevenlabs_webhook_secret or not signature:
+        return False
+    values: dict[str, str] = {}
+    for part in signature.split(","):
+        key, separator, value = part.strip().partition("=")
+        if separator:
+            values[key] = value
+    timestamp = values.get("t")
+    supplied = values.get("v0")
+    if not timestamp or not supplied:
+        return False
+    try:
+        timestamp_int = int(timestamp)
+    except ValueError:
+        return False
+    if abs(time.time() - timestamp_int) > 30 * 60:
+        return False
+    signed_payload = timestamp.encode("utf-8") + b"." + raw_body
+    expected = hmac.new(
+        settings.elevenlabs_webhook_secret.encode("utf-8"),
+        signed_payload,
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(expected, supplied)
+
+
+def _transcript_text(turns: object) -> str:
+    """Convert ElevenLabs transcript turn objects to the existing consent parser format."""
+    if not isinstance(turns, list):
+        return ""
+    lines: list[str] = []
+    for turn in turns:
+        if not isinstance(turn, dict):
+            continue
+        role = turn.get("role")
+        message_text = turn.get("message")
+        if not isinstance(message_text, str) or not message_text.strip():
+            continue
+        speaker = "User" if role in {"user", "human"} else "AI"
+        lines.append(f"{speaker}: {message_text.strip()}")
+    return "\\n".join(lines)
+
+
 @router.post("/webhook", response_model=None)
-def vapi_webhook(
-    payload: dict[str, Any],
+async def elevenlabs_webhook(
+    request: Request,
     db: Session = Depends(get_db),
-    x_vapi_secret: str | None = Header(default=None, alias="x-vapi-secret"),
-) -> dict[str, Any]:
-    if not settings.vapi_webhook_secret:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="VAPI_WEBHOOK_SECRET is not configured",
-        )
-    if not x_vapi_secret or not hmac.compare_digest(
-        x_vapi_secret, settings.vapi_webhook_secret
-    ):
+    signature: str | None = Header(default=None, alias="ElevenLabs-Signature"),
+) -> dict[str, str]:
+    raw_body = await request.body()
+    if not _verify_elevenlabs_signature(raw_body, signature):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid Vapi webhook secret",
+            detail="Invalid ElevenLabs webhook signature",
         )
+    try:
+        payload = json.loads(raw_body)
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(status_code=422, detail="Invalid webhook JSON") from None
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="Webhook body must be an object")
 
-    message = payload.get("message")
-    if not isinstance(message, dict):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Vapi webhook payload must contain a message object",
-        )
-    event_type = message.get("type")
-    call = message.get("call")
-    call = call if isinstance(call, dict) else {}
-    if event_type == "assistant-request":
-        return _handle_assistant_request(message, call, db)
+    event_type = payload.get("type")
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="Webhook data must be an object")
+    conversation_id = data.get("conversation_id")
+    if not isinstance(conversation_id, str):
+        raise HTTPException(status_code=422, detail="Missing conversation_id")
 
-    call_id = call.get("id")
-    call_name = call.get("name")
-
-    screening = (
-        db.scalar(select(Screening).where(Screening.call_id == call_id))
-        if isinstance(call_id, str)
-        else None
+    screening = db.scalar(
+        select(Screening).where(Screening.call_id == conversation_id)
     )
-    if screening is None and isinstance(call_name, str):
-        prefix = "HR screening "
-        if call_name.startswith(prefix):
+    if screening is None:
+        client_data = data.get("conversation_initiation_client_data")
+        dynamic = (
+            client_data.get("dynamic_variables")
+            if isinstance(client_data, dict)
+            else {}
+        )
+        screening_id = dynamic.get("screening_id") if isinstance(dynamic, dict) else None
+        if isinstance(screening_id, str):
             try:
-                screening = db.get(Screening, UUID(call_name[len(prefix) :]))
+                screening = db.get(Screening, UUID(screening_id))
             except ValueError:
                 screening = None
+            if screening is not None:
+                screening.call_id = conversation_id
     if screening is None:
-        logger.warning("Ignoring authenticated Vapi event for an unknown call.")
+        logger.warning("Ignoring ElevenLabs webhook for an unknown conversation.")
         return {"status": "ok"}
 
-    if event_type == "status-update":
-        provider_status = message.get("status")
-        if provider_status == "ended":
-            reason = message.get("endedReason") or call.get("endedReason")
-            screening.ended_reason = reason if isinstance(reason, str) else None
-            screening.ended_at = (
-                _parse_event_datetime(call.get("endedAt"))
-                or datetime.now(timezone.utc)
-            )
-            screening.call_status = (
-                "failed" if _is_failed_end(screening.ended_reason) else "completed"
-            )
-        elif isinstance(provider_status, str):
-            normalized = _VAPI_STATUS_MAP.get(provider_status)
-            if normalized and screening.call_status not in {"completed", "failed"}:
-                screening.call_status = normalized
-                if normalized == "in_progress" and screening.started_at is None:
-                    screening.started_at = (
-                        _parse_event_datetime(call.get("startedAt"))
-                        or datetime.now(timezone.utc)
-                    )
-    elif event_type == "end-of-call-report":
-        if screening.end_report_received:
-            return {"status": "ok"}
-        screening.end_report_received = True
-        reason = message.get("endedReason") or call.get("endedReason")
-        screening.ended_reason = reason if isinstance(reason, str) else None
-        screening.ended_at = (
-            _parse_event_datetime(call.get("endedAt"))
-            or datetime.now(timezone.utc)
-        )
-        if screening.started_at is None:
-            screening.started_at = _parse_event_datetime(call.get("startedAt"))
-        artifact = message.get("artifact")
-        if not isinstance(artifact, dict):
-            artifact = call.get("artifact")
-        if not isinstance(artifact, dict):
-            artifact = {}
-        transcript = artifact.get("transcript") or message.get("transcript")
-        if isinstance(transcript, str):
-            screening.consent_confirmed_on_call = candidate_consented_on_call(
-                transcript
-            )
-            screening.transcript = (
-                transcript[:50_000]
-                if screening.consent_confirmed_on_call is True
-                else None
-            )
-        recording = artifact.get("recording")
-        if screening.consent_confirmed_on_call is True and isinstance(recording, dict):
-            recording_url = next(
-                (
-                    recording.get(key)
-                    for key in (
-                        "recordingUrl",
-                        "stereoRecordingUrl",
-                        "monoRecordingUrl",
-                        "stereoUrl",
-                        "monoUrl",
-                        "url",
-                    )
-                    if isinstance(recording.get(key), str)
-                ),
-                None,
-            )
-            screening.recording_url = (
-                recording_url if _is_https_url(recording_url) else None
-            )
-        else:
-            screening.recording_url = None
-        screening.call_status = (
-            "failed" if _is_failed_end(screening.ended_reason) else "completed"
+    if event_type == "call_initiation_failure":
+        if screening.call_status not in {"completed", "failed"}:
+            reason = data.get("failure_reason")
+            screening.ended_reason = reason if isinstance(reason, str) else "call_initiation_failure"
+            screening.call_status = "failed"
+            screening.ended_at = datetime.now(timezone.utc)
+            screening.summary = "ElevenLabs could not connect the screening call. HR may retry."
+        db.commit()
+        return {"status": "ok"}
+
+    if event_type != "post_call_transcription":
+        return {"status": "ok"}
+    if screening.end_report_received:
+        return {"status": "ok"}
+
+    screening.end_report_received = True
+    screening.ended_at = datetime.now(timezone.utc)
+    screening.call_status = "completed" if data.get("status") == "done" else "failed"
+
+    transcript = _transcript_text(data.get("transcript"))
+    if transcript:
+        screening.consent_confirmed_on_call = candidate_consented_on_call(transcript)
+        screening.transcript = (
+            transcript[:50_000]
+            if screening.consent_confirmed_on_call is True
+            else None
         )
 
-        application = db.get(Application, screening.application_id)
-        job = db.get(Job, application.job_id) if application else None
-        if screening.consent_confirmed_on_call is False:
-            screening.summary = (
-                "The candidate did not consent during the call. "
-                "No screening responses were summarized."
-            )
-        elif screening.consent_confirmed_on_call is None:
-            screening.summary = (
-                "Candidate consent could not be verified from the call transcript. "
-                "HR review is required; responses were not summarized."
-            )
-        elif screening.transcript and job:
-            try:
-                summary = summarize_screening(screening.transcript, job)
-            except Exception:
-                logger.exception("Screening summary generation failed.")
-                summary = ScreeningSummary(
-                    summary=(
-                        "The call ended. Automated summarization failed; "
-                        "review the transcript and responses manually."
-                    ),
-                    answers={},
-                )
-            screening.summary = summary.summary
-            screening.answers = {
-                **summary.answers,
-                "interview_availability": summary.interview_availability or "",
-            }
-            screening.job_related_highlights = summary.job_related_highlights
+    metadata = data.get("metadata")
+    if isinstance(metadata, dict):
+        started = metadata.get("start_time_unix_secs")
+        if isinstance(started, (int, float)):
+            screening.started_at = datetime.fromtimestamp(started, tz=timezone.utc)
 
+    application = db.get(Application, screening.application_id)
+    job = db.get(Job, application.job_id) if application else None
+    if screening.consent_confirmed_on_call is False:
+        screening.summary = (
+            "The candidate did not consent during the call. "
+            "No screening responses were summarized."
+        )
+        screening.recording_url = None
+    elif screening.consent_confirmed_on_call is None:
+        screening.summary = (
+            "Candidate consent could not be verified from the call transcript. "
+            "HR review is required; responses were not summarized."
+        )
+        screening.recording_url = None
+    elif screening.transcript and job:
+        try:
+            summary = summarize_screening(screening.transcript, job)
+        except Exception:
+            logger.exception("ElevenLabs screening summary generation failed.")
+            summary = ScreeningSummary(
+                summary="The call ended. Automated summarization failed; review manually.",
+                answers={},
+            )
+        screening.summary = summary.summary
+        screening.answers = {
+            **summary.answers,
+            "interview_availability": summary.interview_availability or "",
+        }
+        screening.job_related_highlights = summary.job_related_highlights
+
+    # Audio is deliberately not stored by this webhook. The application only
+    # retains transcripts after affirmative consent has been detected.
+    screening.recording_url = None
     db.commit()
     return {"status": "ok"}
 
