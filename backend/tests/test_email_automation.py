@@ -99,7 +99,12 @@ def test_score_boundaries_follow_configured_conservative_defaults(
     score: int,
     expected: str,
 ) -> None:
-    assert classify_score(score) == expected
+    assert classify_score(
+        score,
+        matched_skills=["Python"],
+        required_skills=["Python"],
+        has_relevant_evidence=True,
+    ) == expected
 
 
 def test_missing_match_evidence_does_not_count_as_no_skill_match() -> None:
@@ -609,3 +614,13 @@ def test_low_score_is_automatically_rejected_and_email_attempt_is_logged(
     assert history[0]["status"] == "failed"
     assert "Configure SMTP_HOST" in history[0]["error_message"]
     assert api_client.get(f"/api/applications/{application_id}").json()["status"] == "rejected"
+
+
+def test_unknown_or_missing_cv_evidence_never_auto_rejects() -> None:
+    assert classify_score(20) == "hr_review"
+    assert classify_score(20, matched_skills=None) == "hr_review"
+    assert classify_score(
+        20,
+        matched_skills=[],
+        required_skills=["Python"],
+    ) == "hr_review"
