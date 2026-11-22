@@ -33,8 +33,8 @@ def public_jobs(db: Session = Depends(get_db)):
 def apply(payload: ApplyPayload, principal: dict = Depends(require_candidate), db: Session = Depends(get_db)):
     candidate = db.get(Candidate, UUID(principal["id"]))
     job = db.get(Job, payload.job_id)
-    if job is None or job.status != "published":
-        raise HTTPException(status_code=404, detail="Published job not found")
+    if job is None or job.status != "open":
+        raise HTTPException(status_code=404, detail="Open job not found")
     application = Application(candidate_id=candidate.id, job_id=job.id)
     candidate.phone = payload.phone
     candidate.details = payload.details
