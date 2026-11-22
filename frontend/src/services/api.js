@@ -1,12 +1,18 @@
 import axios from "axios";
 
 export const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api"
+  import.meta.env.VITE_API_BASE_URL || "/api"
 ).replace(/\/+$/, "");
 
 const client = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,
+});
+
+client.interceptors.request.use((config) => {
+  const token = window.localStorage.getItem("hireflow.accessToken");
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
 });
 
 client.interceptors.response.use(
@@ -28,6 +34,15 @@ client.interceptors.response.use(
 );
 
 export const api = {
+  login: (payload) => client.post("/auth/login", payload).then(({ data }) => data),
+  registerCandidate: (payload) => client.post("/auth/candidate/register", payload).then(({ data }) => data),
+  registerHr: (payload) => client.post("/auth/hr/register", payload).then(({ data }) => data),
+  verifyHr: (payload) => client.post("/auth/hr/verify", payload).then(({ data }) => data),
+  getPublicJobs: () => client.get("/portal/jobs").then(({ data }) => data),
+  applyForJob: (payload) => client.post("/portal/applications", payload).then(({ data }) => data),
+  uploadMyResume: (applicationId, file) => { const body = new FormData(); body.append("file", file); return client.post(`/portal/applications/${applicationId}/resume`, body).then(({ data }) => data); },
+  getMyApplications: () => client.get("/portal/applications").then(({ data }) => data),
+  health: () => client.get("/health", { baseURL: "" }).then(({ data }) => data),
   getJobs: () => client.get("/jobs").then(({ data }) => data),
   createJob: (payload) =>
     client.post("/jobs", payload).then(({ data }) => data),

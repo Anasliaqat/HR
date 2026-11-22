@@ -829,7 +829,6 @@ def test_interview_scheduling_and_conflict_detection(
         raise AssertionError("test mode must not make external requests")
 
     monkeypatch.setattr(calendar_service.httpx, "request", reject_network)
-    monkeypatch.setattr(email_service.httpx, "post", reject_network)
     job = client.post(
         "/api/jobs",
         json={"title": "Analyst", "description": "Analyze business data."},
@@ -960,16 +959,10 @@ def test_interview_notification_failures_are_reported(
     monkeypatch.setattr(interview_routes, "get_busy_intervals", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(interview_routes, "create_event", lambda **_: "calendar-event-1")
 
-    def rejected_email(url: str, **_: Any) -> httpx.Response:
-        return httpx.Response(
-            403,
-            json={"message": "rejected"},
-            request=httpx.Request("POST", url),
-        )
+    def rejected_email(*_args: Any, **_kwargs: Any) -> str:
+        raise email_service.EmailServiceError("SMTP could not deliver the notification.")
 
-    monkeypatch.setattr(email_service.httpx, "post", rejected_email)
-    monkeypatch.setattr(settings, "resend_api_key", "test-key")
-    monkeypatch.setattr(settings, "email_from_address", "hr@example.com")
+    monkeypatch.setattr(email_service, "_send_email", rejected_email)
     response = client.post(
         "/api/interviews/schedule",
         json={
