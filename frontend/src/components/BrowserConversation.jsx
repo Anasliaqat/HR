@@ -28,6 +28,8 @@ export default function BrowserConversation({ screeningId, candidate = false, se
       const conversationId = await conversation.startSession({
         conversationToken: session.token,
         userId: screeningId,
+        dynamicVariables: session.dynamic_variables,
+        overrides: session.overrides,
       });
       await api.attachBrowserConversation(screeningId, conversationId, candidate);
     } catch (reason) {
