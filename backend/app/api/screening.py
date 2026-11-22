@@ -339,7 +339,7 @@ def _transcript_text(turns: object) -> str:
             continue
         speaker = "User" if role in {"user", "human"} else "AI"
         lines.append(f"{speaker}: {message_text.strip()}")
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 @router.post("/webhook", response_model=None)
