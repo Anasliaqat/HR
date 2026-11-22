@@ -27,7 +27,7 @@ export default function App() {
    <Route path="/login" element={<AuthPage/>}/>
    <Route path="/candidate" element={<CandidateGuard><CandidatePortalPage/></CandidateGuard>}/>
    <Route element={<HrGuard><AppLayout/></HrGuard>}>
-     <Route index element={<ResumeEvaluationPage/>}/>
+     <Route index element={<DashboardPage/>}/>
      <Route path="dashboard" element={<DashboardPage/>}/>
      <Route path="jobs" element={<JobsPage/>}/>
      <Route path="candidates" element={<CandidatesPage/>}/>
