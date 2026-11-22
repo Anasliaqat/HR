@@ -9,6 +9,12 @@ const client = axios.create({
   timeout: 30000,
 });
 
+client.interceptors.request.use((config) => {
+  const token = window.localStorage.getItem("hireflow.accessToken");
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
 client.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -28,6 +34,13 @@ client.interceptors.response.use(
 );
 
 export const api = {
+  login: (payload) => client.post("/auth/login", payload).then(({ data }) => data),
+  registerCandidate: (payload) => client.post("/auth/candidate/register", payload).then(({ data }) => data),
+  registerHr: (payload) => client.post("/auth/hr/register", payload).then(({ data }) => data),
+  verifyHr: (payload) => client.post("/auth/hr/verify", payload).then(({ data }) => data),
+  getPublicJobs: () => client.get("/portal/jobs").then(({ data }) => data),
+  applyForJob: (payload) => client.post("/portal/applications", payload).then(({ data }) => data),
+  getMyApplications: () => client.get("/portal/applications").then(({ data }) => data),
   health: () => client.get("/health", { baseURL: "" }).then(({ data }) => data),
   getJobs: () => client.get("/jobs").then(({ data }) => data),
   createJob: (payload) =>
