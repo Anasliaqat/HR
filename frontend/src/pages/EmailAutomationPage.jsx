@@ -82,7 +82,7 @@ export default function EmailAutomationPage() {
   const latestEmail = selected?.emails?.[0];
   const canDecide =
     selected?.application_status === "pending_review" &&
-    ["low_score_review", "hr_review", "hr_decision", "interview_eligible"].includes(selected?.score_action);
+    selected?.score_action === "hr_review";
 
   function chooseApplication(id) {
     setSelectedId(id);
@@ -129,6 +129,28 @@ export default function EmailAutomationPage() {
         record.status === "sent"
           ? `Email sent to ${record.recipient_email}.`
           : `Email status: ${record.status}.${record.error_message ? ` ${record.error_message}` : ""}`,
+      );
+      setPreview(null);
+      await loadData();
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function decideApplication(application, decision) {
+    const verb = decision === "approve" ? "accept" : "reject";
+    if (!window.confirm(`${verb[0].toUpperCase()}${verb.slice(1)} ${application.candidate_name}? This records the HR decision and attempts the matching email.`)) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const record = await api.recordEmailDecision(application.application_id, decision);
+      setNotice(
+        record.status === "sent"
+          ? `HR ${verb} recorded. Email sent to ${record.recipient_email}.`
+          : `HR ${verb} recorded. Email status: ${record.status}.${record.error_message ? ` ${record.error_message}` : ""}`,
       );
       setPreview(null);
       await loadData();
@@ -325,7 +347,8 @@ export default function EmailAutomationPage() {
                     <th>Recipient email</th>
                     <th>Sending status</th>
                     <th>Sent date and time</th>
-                    <th>Actions</th>
+                    <th>HR decision</th>
+                    <th>Email history</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -360,6 +383,18 @@ export default function EmailAutomationPage() {
                           <StatusBadge>{latest?.status ?? "not sent"}</StatusBadge>
                         </td>
                         <td>{formatDate(latest?.sent_at)}</td>
+                        <td>
+                          {application.application_status === "pending_review" && application.score_action === "hr_review" ? (
+                            <div className="form-actions">
+                              <button type="button" className="button button-primary button-small" disabled={busy} onClick={() => decideApplication(application, "approve")}>Accept</button>
+                              <button type="button" className="button button-secondary button-small" disabled={busy} onClick={() => decideApplication(application, "reject")}>Reject</button>
+                            </div>
+                          ) : application.score_action === "automatic_rejection" ? (
+                            <span className="muted-copy">Auto-rejection workflow</span>
+                          ) : (
+                            <span className="muted-copy">No HR action required</span>
+                          )}
+                        </td>
                         <td>
                           {application.emails.length > 0 && (
                             <button
