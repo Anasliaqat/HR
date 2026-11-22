@@ -305,18 +305,18 @@ def preview_application_email(
     elif email_type == "rejection" and application.status not in {
         "rejected",
         "rejected_by_hr",
-        "rejected_by_agent",
     }:
         reason = "Record a rejection decision before sending this email."
     elif email_type == "selection" and application.status != "approved_by_hr":
         reason = "Record HR approval before sending this email."
     elif email_type == "interview_invitation" and (
-        interview is None
+        application.status != "approved_by_hr"
+        or interview is None
         or interview.status != "scheduled"
         or interview.test_mode
         or not interview.calendar_event_id
     ):
-        reason = "Only a confirmed, non-test calendar booking can receive an invitation."
+        reason = "HR approval and a confirmed, non-test calendar booking are required for an interview invitation."
     return EmailPreviewResponse(
         email_type=email_type,
         recipient_email=preview.recipient_email,
