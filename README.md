@@ -16,7 +16,7 @@ AI scores are advisory. The current email workflow automatically marks scores at
 
 - `backend/` — FastAPI application, API modules, agents, services, models, and database setup.
 - `frontend/` — React application built with Vite.
-- `tests/` — backend and frontend tests (to be added).
+- `backend/tests/` and `tests/` — backend regression tests.
 - `docker-compose.yml` — local PostgreSQL service for development.
 
 ## Requirements
@@ -74,7 +74,7 @@ The local PostgreSQL service must be running before starting the API. From the p
 
 The Email Automation page uses each application's latest CV score. Scores at or below `EMAIL_AUTOMATION_REJECT_BELOW_SCORE` (default 50) are marked rejected and trigger an attempt to send a rejection email. Cases with missing or contradictory evidence may be placed in the **Over Agent Review** queue for HR review. Scores above the rejection threshold remain subject to the configured HR review and interview eligibility rules. All candidate emails require recorded consent and a working SMTP configuration. Missing evaluation evidence is not treated as proof of irrelevance. Scores through `EMAIL_AUTOMATION_REVIEW_THROUGH_SCORE` stay pending HR review without an email; scores above that and below `EMAIL_AUTOMATION_INTERVIEW_FROM_SCORE` require an HR decision and then send the matching email; scores through `EMAIL_AUTOMATION_INTERVIEW_THROUGH_SCORE` become eligible for interview scheduling and receive an invitation only after a real calendar booking is confirmed. Higher scores follow `EMAIL_AUTOMATION_ABOVE_RANGE_ACTION`, which defaults to `pending_review`. These settings in `backend/.env` let HR configure score boundaries and above-range behavior; keep the thresholds ordered and within 0–100. With defaults, 60% stays in HR review, 61–69% require an HR decision, and 70–90% are eligible for interview scheduling. An HR approval is stored as `approved_by_hr`, distinct from score-based `interview_eligible`.
 
-Recruiting emails are sent through authenticated SMTP; `SCHEDULING_TEST_MODE` does not simulate email delivery. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, and `SMTP_FROM_EMAIL` in `backend/.env`. Delivery requires candidate email consent to be explicitly recorded from the candidate profile. The history stores recipient, template type, subject, body, status, timestamps, provider ID, application, and any delivery error. Failed messages can be retried from the Email Automation page; Resend requests use idempotency keys. Deleting application email history from the dashboard hides the records but retains their idempotency data to prevent accidental duplicate delivery.
+Recruiting emails are sent through authenticated SMTP; `SCHEDULING_TEST_MODE` does not simulate email delivery. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, and `SMTP_FROM_EMAIL` in `backend/.env`. Delivery requires candidate email consent to be explicitly recorded from the candidate profile. The history stores recipient, template type, subject, body, status, timestamps, provider ID, application, and any delivery error. Failed messages can be retried from the Email Automation page; Idempotency keys help prevent accidental duplicate sends. Deleting application email history from the dashboard hides the records but retains their idempotency data to prevent accidental duplicate delivery.
 
 For interview invitations, use the existing interview scheduler to confirm a calendar slot and provide its actual meeting link or office address. Invitations are not sent for test-mode bookings, incomplete meeting details, or candidates without recorded email consent. Configure the score thresholds, delivery provider, and consent policy before enabling real candidate communications. Existing databases receive the email audit, consent, and interview detail columns when the API initializes; for production, use a managed migration process rather than relying on startup schema changes.
 
@@ -165,6 +165,8 @@ Official integration references: Google Calendar [FreeBusy query](https://develo
 ## Backend API endpoints
 
 Open `http://127.0.0.1:8000/docs` to try the endpoints interactively:
+- `POST /api/auth/hr/register`, `POST /api/auth/hr/verify`, `POST /api/auth/candidate/register`, `POST /api/auth/login` — HR verification, candidate registration, and role-based login.
+- `GET /api/portal/jobs`, `POST /api/portal/applications`, `GET /api/portal/applications`, `POST /api/portal/applications/{application_id}/resume` — public open jobs and authenticated candidate-owned applications/CV uploads.
 
 - `GET /` and `GET /health` — API welcome and health checks.
 - `POST /api/jobs`, `GET /api/jobs`, `GET/PUT/DELETE /api/jobs/{job_id}` — create, list, retrieve, update, and delete jobs. Job records include title, department, description, required and preferred skills, experience, education, employment type, location, vacancy count, and draft/open/closed status.
