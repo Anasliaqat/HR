@@ -122,7 +122,7 @@ def send_interview_notifications(
     )
     errors: list[str] = []
     recipients = [("interviewer", interview.interviewer_email)]
-    if cancelled and notify_candidate:
+    if notify_candidate:
         if candidate.email_consent:
             recipients.insert(0, ("candidate", candidate.email))
         else:
