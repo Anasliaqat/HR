@@ -1,7 +1,7 @@
 import axios from "axios";
 
 export const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api"
+  import.meta.env.VITE_API_BASE_URL || "/api"
 ).replace(/\/+$/, "");
 
 const client = axios.create({
@@ -28,6 +28,7 @@ client.interceptors.response.use(
 );
 
 export const api = {
+  health: () => client.get("/health", { baseURL: API_BASE_URL.replace(/\\/api$/, "") }).then(({ data }) => data),
   getJobs: () => client.get("/jobs").then(({ data }) => data),
   createJob: (payload) =>
     client.post("/jobs", payload).then(({ data }) => data),
