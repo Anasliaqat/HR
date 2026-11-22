@@ -299,8 +299,8 @@ def create_candidate_browser_session(
     screening = db.get(Screening, screening_id)
     if screening is None or str(screening.candidate_id) != principal["id"]:
         raise HTTPException(status_code=404, detail="Screening not found")
-    if screening.call_status in {"completed", "failed"}:
-        raise HTTPException(status_code=409, detail="This screening session is already closed")
+    if screening.call_status in {"completed", "failed"} or screening.call_id:
+        raise HTTPException(status_code=409, detail="This screening session is already connected or closed")
     return _browser_session_payload(screening, db, mode)
 
 
