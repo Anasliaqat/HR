@@ -85,6 +85,7 @@ export default function ResumeEvaluationPage() {
     skills: "",
     experience: "",
     portfolio: "",
+    emailConsent: false,
   });
   const [file, setFile] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(null);
@@ -208,6 +209,7 @@ export default function ResumeEvaluationPage() {
       skills: profileSkills(details.skills),
       experience: profileField(details.experience),
       portfolio: profileField(details.portfolio),
+      emailConsent: Boolean(candidate?.email_consent),
     });
     setSelectedResumeId("");
     setEvaluation(null);
@@ -258,6 +260,7 @@ export default function ResumeEvaluationPage() {
         full_name: candidateForm.fullName.trim(),
         email: candidateForm.email.trim(),
         phone: candidateForm.phone.trim() || null,
+        email_consent: candidateForm.emailConsent,
         details: {
           ...(candidateById.get(candidateId)?.details ?? {}),
           education: candidateForm.education.trim(),
@@ -465,21 +468,6 @@ export default function ResumeEvaluationPage() {
     }
   }
 
-  async function approveForScreening() {
-    if (!selectedCandidate || !evaluation) return;
-    setBusy(true);
-    setError("");
-    setNotice("");
-    try {
-      await api.approveCandidate(selectedCandidate.id);
-      setNotice(`${selectedCandidate.full_name} is approved for HR screening review.`);
-      await loadData();
-    } catch (requestError) {
-      setError(requestError.message);
-    } finally {
-      setBusy(false);
-    }
-  }
 
   function toggleComparison(resumeId, checked) {
     setComparisonIds((current) =>
@@ -596,6 +584,14 @@ export default function ResumeEvaluationPage() {
                         setCandidateForm({ ...candidateForm, phone: event.target.value })
                       }
                     />
+                  </label>
+                  <label className="cv-form-full consent-option">
+                    <input
+                      type="checkbox"
+                      checked={candidateForm.emailConsent}
+                      onChange={(event) => setCandidateForm({ ...candidateForm, emailConsent: event.target.checked })}
+                    />
+                    <span>Candidate has explicitly consented to receive recruitment emails. This is required for automatic rejection and HR decision emails.</span>
                   </label>
                   <label>
                     Education
@@ -1126,10 +1122,10 @@ export default function ResumeEvaluationPage() {
                   <button
                     className="button button-primary"
                     type="button"
-                    onClick={approveForScreening}
+                    onClick={() => { window.location.href = "/email-automation"; }}
                     disabled={busy}
                   >
-                    {busy ? "Saving…" : "Approve for screening"}
+                    Review in HR email workflow
                   </button>
                 </div>
               )}
