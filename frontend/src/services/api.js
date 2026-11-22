@@ -28,7 +28,7 @@ client.interceptors.response.use(
 );
 
 export const api = {
-  health: () => client.get("/health", { baseURL: API_BASE_URL.replace(/\\/api$/, "") }).then(({ data }) => data),
+  health: () => client.get("/health", { baseURL: "" }).then(({ data }) => data),
   getJobs: () => client.get("/jobs").then(({ data }) => data),
   createJob: (payload) =>
     client.post("/jobs", payload).then(({ data }) => data),
