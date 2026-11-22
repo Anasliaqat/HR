@@ -75,7 +75,6 @@ async def handle_database_error(
     )
 
 
-@app.get("/api/health", tags=["health"])
 @app.get("/", tags=["health"])
 async def home() -> dict[str, str]:
     return {
