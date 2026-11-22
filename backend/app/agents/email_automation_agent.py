@@ -2,7 +2,12 @@
 
 from typing import Literal
 
+from sqlalchemy.orm import Session
+
 from app.config import settings
+from app.models.application import Application
+from app.models.job import Job
+from app.models.resume_evaluation import ResumeEvaluation
 
 ScoreAction = Literal[
     "low_score_review",
@@ -46,3 +51,43 @@ def classify_score(
     if settings.email_automation_above_range_action == "interview_eligible":
         return "interview_eligible"
     return "hr_review"
+
+
+def apply_resume_score_outcome(db: Session, resume: ResumeEvaluation) -> None:
+    """Keep an application awaiting HR after scoring; never send automatic email."""
+    if resume.score is None or resume.application_id is None:
+        return
+    application = db.get(Application, resume.application_id)
+    if application is None or application.status != "pending_review":
+        return
+    job = db.get(Job, resume.job_id or application.job_id)
+    if job is None:
+        return
+
+    details = resume.evaluation_details or {}
+    matched_skills = details.get("matched_skills")
+    if not isinstance(matched_skills, list):
+        matched_skills = None
+    evidence_keys = (
+        "evidence",
+        "candidate_strengths",
+        "relevant_experience",
+        "relevant_projects",
+    )
+    has_evidence_data = any(key in details for key in evidence_keys)
+    has_relevant_evidence = (
+        any(
+            isinstance(details.get(key), list) and bool(details[key])
+            for key in evidence_keys
+        )
+        if has_evidence_data
+        else None
+    )
+    # Calculate the review category for consistent validation. The score is
+    # displayed to HR; only HR can approve/reject and trigger a candidate email.
+    classify_score(
+        resume.score,
+        matched_skills=matched_skills,
+        required_skills=job.required_skills,
+        has_relevant_evidence=has_relevant_evidence,
+    )
