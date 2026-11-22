@@ -133,6 +133,7 @@ def build_elevenlabs_call_payload(
         "agent_id": settings.elevenlabs_agent_id,
         "agent_phone_number_id": settings.elevenlabs_agent_phone_number_id,
         "to_number": candidate.phone,
+        "call_recording_enabled": False,
         "conversation_initiation_client_data": {
             "dynamic_variables": {
                 "company_name": "ZETECH",
