@@ -15,9 +15,7 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     elevenlabs_api_key: str = ""
     elevenlabs_agent_id: str = ""
-    elevenlabs_agent_phone_number_id: str = ""
     elevenlabs_webhook_secret: str = ""
-    phone_default_region: str = "PK"
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
