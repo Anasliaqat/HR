@@ -25,7 +25,6 @@ from app.config import settings
 from app.database.connection import get_db
 from app.models.application import Application
 from app.models.candidate import Candidate
-from app.models.email_log import EmailLog
 from app.models.job import Job
 from app.models.screening import Screening
 from app.schemas.screening import (
@@ -136,32 +135,6 @@ def _caller_number(message: dict[str, Any], call: dict[str, Any]) -> str | None:
     return number if isinstance(number, str) else None
 
 
-def _matching_application(
-    db: Session,
-    candidate: Candidate,
-) -> Application | None:
-    applications = list(
-        db.scalars(
-            select(Application)
-            .join(
-                EmailLog,
-                EmailLog.application_id == Application.id,
-            )
-            .options(joinedload(Application.job))
-            .where(
-                Application.candidate_id == candidate.id,
-                Application.status.in_(("interview_eligible", "approved_by_hr")),
-                EmailLog.email_type.in_(("screening_invitation", "selection")),
-                EmailLog.status == "sent",
-                EmailLog.deleted_at.is_(None),
-            )
-            .order_by(Application.applied_at.desc())
-        ).all()
-    )
-    unique_applications = {application.id: application for application in applications}
-    return next(iter(unique_applications.values())) if len(unique_applications) == 1 else None
-
-
 @router.post(
     "/{candidate_id}/start",
     response_model=ScreeningResponse,
@@ -181,10 +154,6 @@ def start_screening(
     application = db.get(Application, payload.application_id)
     if application is None or application.candidate_id != candidate_id:
         raise HTTPException(status_code=404, detail="Application not found for this candidate")
-    if application.status not in ("interview_eligible", "approved_by_hr"):
-        raise HTTPException(status_code=409, detail="Application must be approved for screening")
-    if _matching_application(db, candidate) is None or _matching_application(db, candidate).id != application.id:
-        raise HTTPException(status_code=409, detail="A sent screening invitation is required before starting screening")
     active = db.scalar(select(Screening).where(
         Screening.application_id == application.id,
         Screening.call_status.in_(_IN_PROGRESS_STATUSES),
