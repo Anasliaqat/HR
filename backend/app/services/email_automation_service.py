@@ -74,7 +74,10 @@ def build_email_preview(
             "Your skills, qualifications, and experience have attracted our "
             "attention, and we would like to proceed with the next stage of our "
             "recruitment process.\n\n"
-            "Our HR team will coordinate the next steps with you.\n\n"
+            "Please sign in to the ZETECH Candidate Portal to check your application status. "
+            "If an initial AI screening session is available, you can complete it there using "
+            "your browser; no phone call is required. The assistant will ask for your consent "
+            "before screening and transcription begin.\n\n"
             "Congratulations, and thank you for your interest in ZETECH.\n\n"
             "Best Regards,\nHR Team\nZETECH"
         )
