@@ -52,7 +52,9 @@ def verify_hr(payload: VerifyPayload, db: Session = Depends(get_db)):
     user = db.scalar(select(User).where(func.lower(User.email) == str(payload.email).casefold()))
     if user is None or user.is_verified or not user.verification_code_hash or not user.verification_expires_at:
         raise HTTPException(status_code=400, detail="No pending HR verification was found")
-    expires_at = user.verification_expires_at\n    if expires_at.tzinfo is None:\n        expires_at = expires_at.replace(tzinfo=timezone.utc)\n    if expires_at < datetime.now(timezone.utc) or not secrets.compare_digest(user.verification_code_hash, hashlib.sha256(payload.code.encode()).hexdigest()):
+    expires_at = user.verification_expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)\n    if expires_at < datetime.now(timezone.utc) or not secrets.compare_digest(user.verification_code_hash, hashlib.sha256(payload.code.encode()).hexdigest()):
         raise HTTPException(status_code=400, detail="Verification code is invalid or expired")
     user.is_verified = True; user.is_active = True
     user.verification_code_hash = None; user.verification_expires_at = None
