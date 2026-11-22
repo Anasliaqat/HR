@@ -82,7 +82,7 @@ export default function CandidatePortalPage() {
     <section><h2>My AI screening sessions</h2>
       {screenings.length ? screenings.map(screening => <article key={screening.id} style={{ padding: 12, borderBottom: "1px solid var(--border)" }}>
         <strong>Initial screening</strong><p>Status: {screening.status}</p>
-        {["queued", "in_progress", "ringing"].includes(screening.status) &&
+        {(screening.status === "queued" || (screening.status === "in_progress" && !screening.call_id)) &&
           <button className="button button-primary" onClick={() => startScreening(screening)}>Open screening session</button>}
         {screening.status === "completed" && <p>Your screening is complete. HR will review your responses.</p>}
       </article>) : <p>No screening invitation is available yet. HR will create one after reviewing your application.</p>}
