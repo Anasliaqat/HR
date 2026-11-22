@@ -24,7 +24,8 @@ export default function BrowserConversation({ screeningId, candidate = false, se
   async function start() {
     setBusy(true); setError("");
     try {
-      await navigator.mediaDevices.getUserMedia({ audio: true });
+      const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      permissionStream.getTracks().forEach((track) => track.stop());
       const conversationId = await conversation.startSession({
         conversationToken: session.token,
         userId: screeningId,
