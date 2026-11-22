@@ -219,7 +219,7 @@ def _browser_session_payload(screening: Screening, db: Session, mode: str) -> di
                 "prompt": {"prompt": prompt},
                 "firstMessage": (
                     "Hello {{candidate_name}}, I am ZETECH's AI screening assistant. "
-                    "Before we begin, do you consent to this AI screening and transcription for HR review?"
+                    "Before we begin, do you consent to this AI screening, transcription, and AI-generated summary for HR review?"
                 ),
             }
         },
