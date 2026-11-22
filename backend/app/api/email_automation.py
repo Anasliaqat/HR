@@ -282,7 +282,7 @@ def delete_email_history_record(
 def preview_application_email(
     application_id: UUID,
     email_type: str = Query(
-        pattern="^(rejection|selection|screening_invitation|interview_invitation)$"
+        pattern="^(rejection|selection|interview_invitation)$"
     ),
     interview_id: UUID | None = None,
     db: Session = Depends(get_db),
@@ -309,18 +309,14 @@ def preview_application_email(
         reason = "Record a rejection decision before sending this email."
     elif email_type == "selection" and application.status != "approved_by_hr":
         reason = "Record HR approval before sending this email."
-    elif email_type == "screening_invitation" and application.status not in {
-        "interview_eligible",
-        "approved_by_hr",
-    }:
-        reason = "A screening invitation requires a CV-eligible application."
     elif email_type == "interview_invitation" and (
-        interview is None
+        application.status != "approved_by_hr"
+        or interview is None
         or interview.status != "scheduled"
         or interview.test_mode
         or not interview.calendar_event_id
     ):
-        reason = "Only a confirmed, non-test calendar booking can receive an invitation."
+        reason = "HR approval and a confirmed, non-test calendar booking are required for an interview invitation."
     return EmailPreviewResponse(
         email_type=email_type,
         recipient_email=preview.recipient_email,
@@ -364,10 +360,10 @@ def record_hr_decision(
         )
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    if action not in {"hr_review", "hr_decision"}:
+    if action not in {"low_score_review", "hr_review", "hr_decision", "interview_eligible"}:
         raise HTTPException(
             status_code=409,
-            detail="This application is not in a configurable HR decision score band",
+            detail="A completed CV score is required before HR can decide",
         )
     if application.status != "pending_review":
         raise HTTPException(
@@ -476,7 +472,6 @@ def retry_email(
     if email_log.email_type not in {
         "rejection",
         "selection",
-        "screening_invitation",
         "interview_invitation",
     }:
         raise HTTPException(

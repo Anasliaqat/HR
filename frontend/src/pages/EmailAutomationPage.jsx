@@ -14,7 +14,6 @@ import {
 const emailTypes = [
   { value: "rejection", label: "Rejection" },
   { value: "selection", label: "CV approved / selection" },
-  { value: "screening_invitation", label: "AI screening invitation" },
   { value: "interview_invitation", label: "Interview invitation" },
 ];
 
@@ -83,7 +82,7 @@ export default function EmailAutomationPage() {
   const latestEmail = selected?.emails?.[0];
   const canDecide =
     selected?.application_status === "pending_review" &&
-    ["hr_review", "hr_decision"].includes(selected?.score_action);
+    ["low_score_review", "hr_review", "hr_decision", "interview_eligible"].includes(selected?.score_action);
 
   function chooseApplication(id) {
     setSelectedId(id);

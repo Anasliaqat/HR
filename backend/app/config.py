@@ -30,8 +30,6 @@ class Settings(BaseSettings):
     google_calendar_credentials_file: str = ""
     google_calendar_time_zone: str = "UTC"
     scheduling_test_mode: bool = True
-    resend_api_key: str = ""
-    email_from_address: str = ""
     email_automation_reject_below_score: int = 50
     email_automation_review_through_score: int = 60
     email_automation_interview_from_score: int = 70

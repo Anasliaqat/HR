@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict
 EmailType = Literal[
     "rejection",
     "selection",
-    "screening_invitation",
     "interview_invitation",
 ]
 EmailDecision = Literal["approve", "reject"]
