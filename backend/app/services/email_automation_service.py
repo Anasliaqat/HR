@@ -214,13 +214,6 @@ def send_application_email(
         raise EmailAutomationError(
             "A selection email requires a recorded HR approval."
         )
-    elif email_type == "screening_invitation" and application.status not in {
-        "interview_eligible",
-        "approved_by_hr",
-    }:
-        raise EmailAutomationError(
-            "A screening invitation requires a CV-eligible application."
-        )
 
     preview = build_email_preview(application, email_type, interview)
     key = _idempotency_key(application, email_type, interview)
