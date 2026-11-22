@@ -277,8 +277,8 @@ def attach_hr_conversation(
 ) -> dict[str, str]:
     screening = db.get(Screening, screening_id)
     conversation_id = payload.get("conversation_id")
-    if screening is None or not isinstance(conversation_id, str) or not conversation_id.startswith("conv_"):
-        raise HTTPException(status_code=400, detail="Valid screening and conversation ID are required")
+    if screening is None or screening.call_id or not isinstance(conversation_id, str) or not conversation_id.startswith("conv_"):
+        raise HTTPException(status_code=400, detail="Valid unclaimed screening and conversation ID are required")
     screening.call_id = conversation_id
     screening.call_status = "in_progress"
     screening.started_at = datetime.now(timezone.utc)
@@ -315,8 +315,8 @@ def attach_candidate_conversation(
     conversation_id = payload.get("conversation_id")
     if screening is None or str(screening.candidate_id) != principal["id"]:
         raise HTTPException(status_code=404, detail="Screening not found")
-    if not isinstance(conversation_id, str) or not conversation_id.startswith("conv_"):
-        raise HTTPException(status_code=400, detail="Valid conversation ID is required")
+    if screening.call_id or not isinstance(conversation_id, str) or not conversation_id.startswith("conv_"):
+        raise HTTPException(status_code=400, detail="Valid unclaimed conversation ID is required")
     if screening.call_status in {"completed", "failed"}:
         raise HTTPException(status_code=409, detail="This screening session is already closed")
     screening.call_id = conversation_id
@@ -446,22 +446,7 @@ async def elevenlabs_webhook(
     screening = db.scalar(
         select(Screening).where(Screening.call_id == conversation_id)
     )
-    if screening is None:
-        client_data = data.get("conversation_initiation_client_data")
-        dynamic = (
-            client_data.get("dynamic_variables")
-            if isinstance(client_data, dict)
-            else {}
-        )
-        screening_id = dynamic.get("screening_id") if isinstance(dynamic, dict) else None
-        if isinstance(screening_id, str):
-            try:
-                screening = db.get(Screening, UUID(screening_id))
-            except ValueError:
-                screening = None
-            if screening is not None:
-                screening.call_id = conversation_id
-    if screening is None:
+    # Only the authenticated browser-session endpoint may associate a conversation ID.\n    # Do not trust screening IDs echoed in client-controlled dynamic variables.\n    if screening is None:
         logger.warning("Ignoring ElevenLabs webhook for an unknown conversation.")
         return {"status": "ok"}
 
