@@ -166,7 +166,7 @@ def _handle_assistant_request(
     call: dict[str, Any],
     db: Session,
 ) -> dict[str, Any]:
-    if not settings.elevenlabs_assistant_id:
+    if not settings.elevenlabs_agent_id:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="ELEVENLABS_ASSISTANT_ID is not configured",
@@ -176,7 +176,7 @@ def _handle_assistant_request(
     if isinstance(call_id, str):
         existing = db.scalar(select(Screening).where(Screening.call_id == call_id))
         if existing is not None:
-            return {"assistantId": settings.vapi_assistant_id}
+            return {"status": "ok"}
 
     caller_number = _caller_number(message, call)
     normalized_caller = normalize_phone_number(
@@ -217,7 +217,7 @@ def _handle_assistant_request(
             logger.info(
                 "Inbound ElevenLabs call is not uniquely attributable; no candidate context was provided."
             )
-    return {"assistantId": settings.vapi_assistant_id}
+    return {"status": "ok"}
 
 
 @router.post(
@@ -252,15 +252,15 @@ def start_screening(
             detail="Candidate must have a phone number before screening",
         )
     if not (
-        settings.vapi_api_key
-        and settings.vapi_assistant_id
-        and settings.vapi_phone_number_id
+        settings.elevenlabs_api_key
+        and settings.elevenlabs_agent_id
+        and settings.elevenlabs_agent_phone_number_id
     ):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
-                "Vapi is not configured; set VAPI_API_KEY, "
-                "VAPI_ASSISTANT_ID, and VAPI_PHONE_NUMBER_ID"
+                "ElevenLabs is not configured; set ELEVENLABS_API_KEY, "
+                "ELEVENLABS_AGENT_ID, and ELEVENLABS_AGENT_PHONE_NUMBER_ID"
             ),
         )
 
@@ -303,25 +303,21 @@ def start_screening(
         call = create_outbound_call(
             build_elevenlabs_call_payload(candidate, job, str(screening.id))
         )
-    except (VapiServiceError, ValueError, RuntimeError) as exc:
+    except (ElevenLabsServiceError, ValueError, RuntimeError) as exc:
         screening.call_status = "failed"
-        screening.summary = "Call could not be initiated. HR may retry after checking Vapi configuration."
+        screening.summary = "Call could not be initiated. HR may retry after checking ElevenLabs configuration."
         db.commit()
         if isinstance(exc, (ValueError, RuntimeError)) and not isinstance(
-            exc, VapiServiceError
+            exc, ElevenLabsServiceError
         ):
-            logger.exception("Unable to prepare Vapi screening call.")
+            logger.exception("Unable to prepare ElevenLabs screening call.")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(exc),
         ) from exc
 
     screening.call_id = call["conversation_id"]
-    returned_status = call.get("status")
-    if isinstance(returned_status, str):
-        screening.call_status = _VAPI_STATUS_MAP.get(
-            returned_status, screening.call_status
-        )
+    screening.call_status = "queued"
     db.commit()
     db.refresh(screening)
     return _response(screening)
