@@ -418,6 +418,7 @@ export default function ResumeEvaluationPage() {
       skills: profileSkills(details.skills),
       experience: profileField(details.experience),
       portfolio: profileField(details.portfolio),
+      emailConsent: Boolean(candidate?.email_consent),
     });
 
     const savedJobId =
@@ -1119,14 +1120,9 @@ export default function ResumeEvaluationPage() {
                       advancement.
                     </p>
                   </div>
-                  <button
-                    className="button button-primary"
-                    type="button"
-                    onClick={() => { window.location.href = "/email-automation"; }}
-                    disabled={busy}
-                  >
+                  <Link className="button button-primary" to="/email-automation">
                     Review in HR email workflow
-                  </button>
+                  </Link>
                 </div>
               )}
             </>
