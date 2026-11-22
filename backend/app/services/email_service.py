@@ -1,11 +1,12 @@
-"""Resend email delivery with a no-send test mode."""
+"""SMTP email delivery for interview notifications."""
 
+import hashlib
 import logging
+import smtplib
+import ssl
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
-
-import httpx
+from email.message import EmailMessage
 
 from app.config import settings
 from app.models.candidate import Candidate
@@ -13,7 +14,6 @@ from app.models.interview import Interview
 from app.models.job import Job
 
 logger = logging.getLogger(__name__)
-RESEND_EMAILS_URL = "https://api.resend.com/emails"
 
 
 class EmailServiceError(RuntimeError):
@@ -29,37 +29,53 @@ class NotificationResult:
 def _send_email(to: str, subject: str, text: str, idempotency_key: str) -> str:
     if settings.scheduling_test_mode:
         return "test-mode"
-    if not settings.resend_api_key or not settings.email_from_address:
+    if not settings.smtp_host or not settings.smtp_user or not settings.smtp_password:
         raise EmailServiceError(
-            "RESEND_API_KEY and EMAIL_FROM_ADDRESS must be configured."
+            "SMTP_HOST, SMTP_USER, and SMTP_PASSWORD must be configured."
         )
+
+    message = EmailMessage()
+    message["From"] = settings.smtp_from_email or settings.smtp_user
+    message["To"] = to
+    message["Subject"] = subject
+    message["Message-ID"] = (
+        f"<{hashlib.sha256(idempotency_key.encode()).hexdigest()}@zetech.local>"
+    )
+    message.set_content(text)
+
     try:
-        response = httpx.post(
-            RESEND_EMAILS_URL,
-            headers={
-                "Authorization": f"Bearer {settings.resend_api_key}",
-                "Content-Type": "application/json",
-                "Idempotency-Key": idempotency_key,
-            },
-            json={
-                "from": settings.email_from_address,
-                "to": [to],
-                "subject": subject,
-                "text": text,
-            },
-            timeout=20.0,
-        )
-        response.raise_for_status()
-        payload: Any = response.json()
-    except httpx.HTTPStatusError as exc:
-        logger.error("Resend email request failed with HTTP %s", exc.response.status_code)
-        raise EmailServiceError("Resend rejected an interview notification.") from exc
-    except (httpx.RequestError, ValueError) as exc:
-        logger.error("Resend email request failed due to a transport or response error.")
-        raise EmailServiceError("Resend could not deliver an interview notification.") from exc
-    if not isinstance(payload, dict) or not isinstance(payload.get("id"), str):
-        raise EmailServiceError("Resend returned no email ID.")
-    return payload["id"]
+        if settings.smtp_port == 465:
+            with smtplib.SMTP_SSL(
+                settings.smtp_host,
+                settings.smtp_port,
+                timeout=20,
+                context=ssl.create_default_context(),
+            ) as client:
+                client.login(settings.smtp_user, settings.smtp_password)
+                client.send_message(message)
+        else:
+            with smtplib.SMTP(
+                settings.smtp_host,
+                settings.smtp_port,
+                timeout=20,
+            ) as client:
+                client.ehlo()
+                client.starttls(context=ssl.create_default_context())
+                client.ehlo()
+                client.login(settings.smtp_user, settings.smtp_password)
+                client.send_message(message)
+    except smtplib.SMTPAuthenticationError as exc:
+        logger.warning("SMTP interview notification authentication failed.")
+        raise EmailServiceError(
+            "SMTP authentication failed. For Gmail, use a Google App Password."
+        ) from exc
+    except (OSError, smtplib.SMTPException) as exc:
+        logger.warning("SMTP interview notification delivery failed.")
+        raise EmailServiceError(
+            "SMTP could not deliver the interview notification. Check the SMTP settings."
+        ) from exc
+
+    return message["Message-ID"]
 
 
 def _appointment_text(
