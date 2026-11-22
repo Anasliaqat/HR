@@ -343,6 +343,7 @@ export default function EmailAutomationPage() {
                     <th>Candidate</th>
                     <th>Job title</th>
                     <th>CV score</th>
+                    <th>CV summary</th>
                     <th>Email type</th>
                     <th>Recipient email</th>
                     <th>Sending status</th>
@@ -377,6 +378,7 @@ export default function EmailAutomationPage() {
                         </td>
                         <td>{application.job_title}</td>
                         <td>{application.cv_score == null ? "—" : `${application.cv_score}%`}</td>
+                        <td className="cv-summary-cell">{application.cv_summary || "Summary is not available yet."}</td>
                         <td>{latest ? labelForEmail(latest.email_type) : "—"}</td>
                         <td>{application.recipient_email}</td>
                         <td>
@@ -423,6 +425,7 @@ export default function EmailAutomationPage() {
                 title="Review and prepare email"
                 subtitle={`${selected.candidate_name} · ${selected.job_title} · ${selected.cv_score == null ? "No CV score" : `${selected.cv_score}% CV score`}`}
               >
+                {selected.cv_summary && <div className="email-cv-summary"><strong>AI CV summary for HR</strong><p>{selected.cv_summary}</p><p><strong>Matched skills:</strong> {selected.matched_skills.join(", ") || "None recorded"}</p><p><strong>Missing required skills:</strong> {selected.missing_skills.join(", ") || "None recorded"}</p></div>}
                 <p className="email-consent-summary">
                   Candidate email consent:{" "}
                   <StatusBadge>
