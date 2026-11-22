@@ -281,8 +281,6 @@ export default function ScreeningPage() {
                   </div>
                   <p className="muted-copy">
                     {report.job_title ?? selectedJob?.title ?? "Position unavailable"}
-                    {" · "}
-                    {report.candidate_id ?? ""}
                   </p>
                   <StatusBadge>{statusLabels[report.status] ?? report.status}</StatusBadge>
                 </div>
