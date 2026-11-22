@@ -54,6 +54,7 @@ def test_zero_year_experience_requirement_does_not_award_experience_points(
         job_description="Entry-level developer working with generative AI.",
         required_skills=["Python", "Generative AI"],
         required_experience_years=0,
+        required_education="Bachelor's degree",
     )
 
     assert result.matched_skills == ["Python", "Generative AI"]
@@ -74,3 +75,20 @@ def test_equivalent_required_skill_labels_are_not_counted_twice() -> None:
     )
 
     assert skills == ["RAG", "Generative AI"]
+
+def test_unspecified_education_is_excluded_from_score(monkeypatch) -> None:
+    monkeypatch.setattr(resume_agent, "semantic_similarity", lambda _left, _right: 0.0)
+    result = resume_agent.score_resume(
+        ResumeProfile(skills=["Python"]),
+        job_title="Python Developer",
+        job_description="Build Python services.",
+        required_skills=["Python"],
+        required_experience_years=None,
+        required_education=None,
+    )
+
+    assert "education_and_certifications" in result.excluded_rubric_categories
+    assert result.rubric_scores["education_and_certifications"] == 0
+    assert result.score == 44
+    assert "education and certifications not weighted" in result.explanation
+    assert "normalized across 90 applicable rubric points" in result.explanation
