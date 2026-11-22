@@ -346,6 +346,14 @@ def _deterministic_explanation(result: ResumeEvaluationResult) -> str:
             f"{rubric.get('relevant_experience', 0):g}/25; "
         )
     )
+    education_breakdown = (
+        "education and certifications not weighted (no education requirement); "
+        if "education_and_certifications" in excluded_categories
+        else (
+            f"education and certifications "
+            f"{rubric.get('education_and_certifications', 0):g}/10; "
+        )
+    )
     score_breakdown = (
         " Score breakdown: "
         f"required skills {rubric.get('required_skills', 0):g}/40 "
@@ -353,8 +361,7 @@ def _deterministic_explanation(result: ResumeEvaluationResult) -> str:
         f"{len(result.matched_skills) + len(result.missing_required_skills)} matched); "
         f"{experience_breakdown}"
         f"projects {rubric.get('projects', 0):g}/20; "
-        f"education and certifications "
-        f"{rubric.get('education_and_certifications', 0):g}/10; "
+        f"{education_breakdown}"
         f"other relevant evidence "
         f"{rubric.get('other_relevant_evidence', 0):g}/5."
         f"{experience_exclusion} "
@@ -429,6 +436,8 @@ def score_resume(
     excluded_categories: list[str] = []
     if required_experience_years == 0:
         excluded_categories.append("relevant_experience")
+    if not required_education:
+        excluded_categories.append("education_and_certifications")
     applicable_points = sum(
         weight
         for category, weight in SCORING_WEIGHTS.items()
