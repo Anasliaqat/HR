@@ -166,6 +166,7 @@ def list_email_applications(
             job_id=application.job.id,
             job_title=application.job.title,
             cv_score=score,
+            cv_summary=resume.explanation if resume else None,
             score_action=score_action,
             application_status=application.status,
             matched_skills=matched_skills,
