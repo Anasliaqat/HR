@@ -112,7 +112,13 @@ def test_missing_match_evidence_does_not_count_as_no_skill_match() -> None:
 
 def test_low_score_is_auto_rejected_and_email_attempt_is_logged(
     db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        email_automation_service,
+        "_deliver",
+        lambda *_args, **_kwargs: "test-message-id",
+    )
     application, resume = create_application(
         db_session, score=42, email_consent=True
     )
@@ -122,7 +128,8 @@ def test_low_score_is_auto_rejected_and_email_attempt_is_logged(
     email_log = db_session.scalar(select(EmailLog))
     assert email_log is not None
     assert email_log.email_type == "rejection"
-    assert email_log.status in {"sent", "failed"}
+    assert email_log.status == "sent"
+    assert email_log.provider_message_id == "test-message-id"
 
 
 def test_review_score_stays_pending_without_sending_email(
