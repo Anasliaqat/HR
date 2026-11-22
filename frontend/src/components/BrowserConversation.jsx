@@ -10,7 +10,7 @@ export default function BrowserConversation({ screeningId, candidate = false, se
   const conversation = useConversation({
     overrides: session.overrides,
     onMessage: (message) => {
-      const text = message?.message ?? message?.text ?? message?.source?.text;
+      const text = typeof message === "string" ? message : (message?.message ?? message?.text ?? message?.source?.text);
       if (typeof text === "string" && text.trim()) {
         setMessages((current) => [...current, {
           role: message?.source === "user" || message?.role === "user" ? "You" : "Assistant",
