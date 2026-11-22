@@ -11,8 +11,8 @@ class ScreeningStartRequest(BaseModel):
     application_id: UUID
     consent_confirmed: bool = Field(default=False,
         description=(
-            "HR confirms the candidate consented to screening, any configured call "
-            "recording, transcription, and AI-generated summary."
+            "The candidate confirms consent verbally in the browser to screening, any configured audio "
+            "transcription, and AI-generated summary."
         )
     )
 
