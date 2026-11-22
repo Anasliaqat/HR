@@ -57,7 +57,7 @@ export default function BrowserConversation({ screeningId, candidate = false, se
       <span className="status-badge">{conversation.status}</span></div>
     {conversation.status !== "connected" ? <button className="button button-primary" disabled={busy} onClick={start}>{busy ? "Connecting…" : "Start screening conversation"}</button> :
       <div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button className="button button-secondary" onClick={()=>conversation.setMuted(!conversation.isMuted)}>{conversation.isMuted ? "Unmute microphone" : "Mute microphone"}</button><button className="button button-danger" disabled={busy} onClick={end}>End conversation</button></div>}
-    <p className="form-note">The assistant must ask for your verbal consent to AI screening and transcription before asking job questions. You can decline or stop at any time.</p>
+    <p className="form-note">The assistant must ask for your verbal consent to AI screening, transcription, and AI-generated summary before asking job questions. You can decline or stop at any time.</p>
     {conversation.status === "connected" && <form onSubmit={sendText} style={{display:"flex",gap:8,marginTop:12}}><input aria-label="Type a message" value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Or type your answer…" /><button className="button button-primary" disabled={!draft.trim()}>Send</button></form>}
     {messages.length>0 && <div style={{maxHeight:260,overflowY:"auto",marginTop:12}}>{messages.map((item,index)=><p key={index}><strong>{item.role}:</strong> {item.text}</p>)}</div>}
     {error && <p role="alert" style={{color:"crimson"}}>{error}</p>}
