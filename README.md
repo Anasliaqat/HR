@@ -1,14 +1,16 @@
 # AI-Powered HR Hiring Automation
 
-A starter project for an HR-reviewed hiring workflow using FastAPI, React, PostgreSQL, OpenAI, LangGraph, and Vapi.
+A role-based HR hiring application using FastAPI, React, SQLAlchemy, SQLite/PostgreSQL, resume scoring, email automation, and voice screening.
 
-The planned workflow has three AI-assisted stages:
+The application currently supports these workflows:
 
-1. PDF/DOCX resume parsing and local semantic job-match scoring.
-2. Screening calls and answer summaries.
-3. Interview availability and scheduling.
+1. HR registration with email verification and candidate registration/login.
+2. Public job browsing, candidate applications, and private application status.
+3. PDF/DOCX/TXT resume upload and local job-match scoring.
+4. HR review, configured low-score rejection, and consent-gated email delivery.
+5. Voice screening through the currently implemented Vapi integration and interview scheduling.
 
-AI output is advisory. HR must review and approve candidates before they advance; the system must not automatically reject candidates.
+AI scores are advisory. The current email workflow automatically marks scores at or below the configured rejection threshold (default 50) as rejected and attempts a consent-gated rejection email. Other decisions remain with HR.
 
 ## Project layout
 
@@ -70,7 +72,7 @@ The local PostgreSQL service must be running before starting the API. From the p
 
 ## ZETECH email automation
 
-The Email Automation page uses each application's latest CV score and HR review workflow. Scores below `EMAIL_AUTOMATION_REJECT_BELOW_SCORE`, evaluations with configured required skills but no matched skills, and evaluations that explicitly contain no relevant evidence are placed in the separate **Over Agent Review** queue without sending an automatic email. HR's manual approval or rejection in that queue sends the matching selection or rejection email only when candidate consent and provider configuration permit it. Missing evaluation evidence is not treated as proof of irrelevance. Scores through `EMAIL_AUTOMATION_REVIEW_THROUGH_SCORE` stay pending HR review without an email; scores above that and below `EMAIL_AUTOMATION_INTERVIEW_FROM_SCORE` require an HR decision and then send the matching email; scores through `EMAIL_AUTOMATION_INTERVIEW_THROUGH_SCORE` become eligible for interview scheduling and receive an invitation only after a real calendar booking is confirmed. Higher scores follow `EMAIL_AUTOMATION_ABOVE_RANGE_ACTION`, which defaults to `pending_review`. These settings in `backend/.env` let HR configure score boundaries and above-range behavior; keep the thresholds ordered and within 0–100. With defaults, 60% stays in HR review, 61–69% require an HR decision, and 70–90% are eligible for interview scheduling. An HR approval is stored as `approved_by_hr`, distinct from score-based `interview_eligible`.
+The Email Automation page uses each application's latest CV score. Scores at or below `EMAIL_AUTOMATION_REJECT_BELOW_SCORE` (default 50) are marked rejected and trigger an attempt to send a rejection email. Cases with missing or contradictory evidence may be placed in the **Over Agent Review** queue for HR review. Scores above the rejection threshold remain subject to the configured HR review and interview eligibility rules. All candidate emails require recorded consent and a working SMTP configuration. Missing evaluation evidence is not treated as proof of irrelevance. Scores through `EMAIL_AUTOMATION_REVIEW_THROUGH_SCORE` stay pending HR review without an email; scores above that and below `EMAIL_AUTOMATION_INTERVIEW_FROM_SCORE` require an HR decision and then send the matching email; scores through `EMAIL_AUTOMATION_INTERVIEW_THROUGH_SCORE` become eligible for interview scheduling and receive an invitation only after a real calendar booking is confirmed. Higher scores follow `EMAIL_AUTOMATION_ABOVE_RANGE_ACTION`, which defaults to `pending_review`. These settings in `backend/.env` let HR configure score boundaries and above-range behavior; keep the thresholds ordered and within 0–100. With defaults, 60% stays in HR review, 61–69% require an HR decision, and 70–90% are eligible for interview scheduling. An HR approval is stored as `approved_by_hr`, distinct from score-based `interview_eligible`.
 
 Emails are sent for real through Resend or SMTP; `SCHEDULING_TEST_MODE` does not simulate this email agent. Configure either `RESEND_API_KEY` with `EMAIL_FROM_ADDRESS`, or `SMTP_HOST`, `SMTP_PORT`, and a sender using `SMTP_FROM_EMAIL` or `EMAIL_FROM_ADDRESS`. SMTP authentication uses `SMTP_USER` and `SMTP_PASSWORD` when a user is set. Delivery requires candidate email consent to be explicitly recorded from the candidate profile. The history stores recipient, template type, subject, body, status, timestamps, provider ID, application, and any delivery error. Failed messages can be retried from the Email Automation page; Resend requests use idempotency keys. Deleting application email history from the dashboard hides the records but retains their idempotency data to prevent accidental duplicate delivery.
 
@@ -196,11 +198,12 @@ npm run dev
 
 Vite prints the local frontend URL when it starts.
 
-The React Router dashboard provides Dashboard, Jobs, Candidates, Resume Evaluation, Screening, Interviews, and Settings sections. All API requests are centralized in `frontend/src/services/api.js`; set `VITE_API_BASE_URL` in `frontend/.env` to the FastAPI API base URL. Resume upload and evaluation use the existing resume API, while the candidates page uses `GET /api/resumes` to display saved match scores. Settings displays only browser-local profile preferences because the backend does not currently have an authenticated user profile or integration-health endpoint.
+The React application provides separate HR and candidate portals. HR pages include Dashboard, Jobs, Candidates, Resume Evaluation, Screening, Interviews, Email Automation, and Settings. Candidates can browse open jobs, apply, upload a CV, and view only their own application statuses. All API requests are centralized in `frontend/src/services/api.js`; set `VITE_API_BASE_URL` in `frontend/.env` to the FastAPI API base URL. Resume upload and evaluation use the existing resume API, while the candidates page uses `GET /api/resumes` to display saved match scores. Settings displays only browser-local profile preferences because the backend does not currently have an authenticated user profile or integration-health endpoint.
 
 ## Remaining implementation
 
 - Database migrations for future schema changes; startup currently creates missing tables only.
-- Authentication and authorization for HR accounts and approval actions. Do
-  not expose the dashboard/API publicly until HR authentication is implemented.
+- Add automated frontend and browser end-to-end tests for HR and candidate journeys.
+- Add request rate limiting and stronger operational security controls before public deployment.
+- Replace the current Vapi voice integration with ElevenLabs if ElevenLabs is the required provider; the current screening code still calls Vapi.
 - Automated UI tests, operational migrations for remaining legacy schemas, and production deployment configuration.
