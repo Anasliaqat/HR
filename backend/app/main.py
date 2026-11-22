@@ -22,6 +22,7 @@ cors_origins.update({"http://localhost:5173", "http://127.0.0.1:5173"})
 app.add_middleware(CORSMiddleware, allow_origins=sorted(cors_origins), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.include_router(auth.router, prefix=settings.api_v1_prefix)
 app.include_router(portal.router, prefix=settings.api_v1_prefix)
+app.include_router(screening.candidate_router, prefix=settings.api_v1_prefix)
 hr_guard = [Depends(require_hr)]
 app.include_router(jobs.router, prefix=settings.api_v1_prefix, dependencies=hr_guard)
 app.include_router(candidates.router, prefix=settings.api_v1_prefix, dependencies=hr_guard)
