@@ -360,10 +360,10 @@ def record_hr_decision(
         )
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    if action not in {"low_score_review", "hr_review", "hr_decision", "interview_eligible"}:
+    if action != "hr_review":
         raise HTTPException(
             status_code=409,
-            detail="A completed CV score is required before HR can decide",
+            detail="Only applications scoring above 50 are sent to the HR decision queue.",
         )
     if application.status != "pending_review":
         raise HTTPException(
