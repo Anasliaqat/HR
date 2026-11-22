@@ -140,8 +140,6 @@ export default function JobsPage() {
     const payload = {
       title,
       description,
-      title: form.title.trim(),
-      description: form.description.trim(),
       department: form.department.trim() || null,
       location: form.location.trim() || null,
       employment_type: form.employment_type.trim() || null,
@@ -273,7 +271,7 @@ export default function JobsPage() {
             </button>
           }
           >
-          <form className="form-grid" onSubmit={submitJob} noValidate>
+          <form className="form-grid" onSubmit={submitJob}>
             {error && (
               <div className="error-banner form-full" role="alert">
                 {error}
