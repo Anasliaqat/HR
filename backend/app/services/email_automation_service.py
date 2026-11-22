@@ -192,6 +192,10 @@ def send_application_email(
             "Candidate emails are disabled until HR decides an Over Agent Review application."
         )
     if email_type == "interview_invitation":
+        if application.status != "approved_by_hr":
+            raise EmailAutomationError(
+                "An interview invitation requires recorded HR approval."
+            )
         if (
             interview is None
             or interview.status != "scheduled"
