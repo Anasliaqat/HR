@@ -43,9 +43,9 @@ const pageNames = {
 
 function getStoredTheme() {
   try {
-    return window.localStorage.getItem("hireflow.theme") === "light"
-      ? "light"
-      : "dark";
+    return window.localStorage.getItem("hireflow.theme") === "dark"
+      ? "dark"
+      : "light";
   } catch {
     return "dark";
   }
