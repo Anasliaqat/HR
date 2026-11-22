@@ -476,7 +476,7 @@ def test_hr_decision_and_history_api_preserve_consent_gate(
     )
     assert retry.status_code == 200
     assert retry.json()["status"] == "failed"
-    assert "Configure RESEND_API_KEY" in retry.json()["error_message"]
+    assert "Configure SMTP_HOST" in retry.json()["error_message"]
     assert retry.json()["sent_at"] is None
 
     delete_history = api_client.delete(
