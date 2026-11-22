@@ -212,6 +212,7 @@ def test_email_template_uses_candidate_and_job_values(db_session: Session) -> No
 
 def test_flagged_application_requires_hr_decision_before_email(
     db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     application, _ = create_application(
         db_session,
@@ -228,6 +229,15 @@ def test_flagged_application_requires_hr_decision_before_email(
 
     application.status = "approved_by_hr"
     db_session.commit()
+
+    # Never use real Gmail credentials in this unit test. Simulate a failed
+    # SMTP delivery so the test cannot send an actual candidate email.
+    def fail_delivery(*_args, **_kwargs):
+        raise email_automation_service.EmailAutomationError(
+            "SMTP could not deliver the recruiting email."
+        )
+
+    monkeypatch.setattr(email_automation_service, "_deliver", fail_delivery)
     email_log = send_application_email(db_session, application, "selection")
     assert email_log.email_type == "selection"
     assert email_log.status == "failed"
