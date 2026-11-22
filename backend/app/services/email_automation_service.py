@@ -177,6 +177,7 @@ def _deliver(preview: EmailPreview, idempotency_key: str) -> str:
 
     return message["Message-ID"]
 
+
 def send_application_email(
     db: Session,
     application: Application,
