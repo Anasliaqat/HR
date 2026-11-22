@@ -152,7 +152,7 @@ export default function ScreeningPage() {
       });
       setReport(result);
       setScreeningId(result.id);
-      setNotice("Call requested. This action starts a real outbound call when Vapi is configured.");
+      setNotice("Call requested. This action starts a real outbound call when ElevenLabs is configured.");
       setConsentConfirmed(false);
     } catch (requestError) {
       setError(requestError.message);
@@ -262,7 +262,7 @@ export default function ScreeningPage() {
               {starting ? "Requesting call…" : "Start screening call"}
             </button>
             <p className="form-note">
-              Clicking starts a real call when Vapi credentials are configured.
+              Clicking starts a real call when ElevenLabs credentials are configured.
               Use a test number while developing.
             </p>
           </Panel>
@@ -368,7 +368,7 @@ export default function ScreeningPage() {
         >
           {screenings.length === 0 ? (
             <EmptyState title="No screening calls recorded">
-              Calls are listed after a uniquely matched candidate calls the Vapi number.
+              Calls are listed after an invited candidate's ElevenLabs screening call is completed.
             </EmptyState>
           ) : (
             <div className="table-scroll">
