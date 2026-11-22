@@ -54,6 +54,7 @@ def test_zero_year_experience_requirement_does_not_award_experience_points(
         job_description="Entry-level developer working with generative AI.",
         required_skills=["Python", "Generative AI"],
         required_experience_years=0,
+        required_education="Bachelor's degree",
     )
 
     assert result.matched_skills == ["Python", "Generative AI"]
