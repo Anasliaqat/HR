@@ -151,7 +151,7 @@ def _matching_application(
             .where(
                 Application.candidate_id == candidate.id,
                 Application.status.in_(("interview_eligible", "approved_by_hr")),
-                EmailLog.email_type == "screening_invitation",
+                EmailLog.email_type.in_(("screening_invitation", "selection")),
                 EmailLog.status == "sent",
                 EmailLog.deleted_at.is_(None),
             )
