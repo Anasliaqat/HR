@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 class ScreeningStartRequest(BaseModel):
     application_id: UUID
-    consent_confirmed: bool = Field(
+    consent_confirmed: bool = Field(default=False,
         description=(
             "HR confirms the candidate consented to screening, any configured call "
             "recording, transcription, and AI-generated summary."
