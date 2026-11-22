@@ -1,98 +1,47 @@
 """FastAPI application entry point."""
-
 from contextlib import asynccontextmanager
 import logging
 from collections.abc import AsyncGenerator
-
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
-
-from app.api import (
-    applications,
-    candidates,
-    email_automation,
-    interviews,
-    jobs,
-    resumes,
-    screening,
-)
+from app.api import applications, candidates, email_automation, interviews, jobs, resumes, screening, auth, portal
 from app.config import settings
-from app.database.connection import (
-    DatabaseConfigurationError,
-    get_engine,
-    init_db,
-)
-
+from app.database.connection import DatabaseConfigurationError, get_engine, init_db
+from app.security import require_hr
 logger = logging.getLogger(__name__)
-
-
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
     init_db()
     yield
-
-
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
-
-cors_origins = {
-    origin.strip()
-    for origin in settings.cors_origins.split(",")
-    if origin.strip()
-}
-cors_origins.update(
-    {"http://localhost:5173", "http://127.0.0.1:5173"}
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=sorted(cors_origins),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-app.include_router(jobs.router, prefix=settings.api_v1_prefix)
-app.include_router(candidates.router, prefix=settings.api_v1_prefix)
-app.include_router(applications.router, prefix=settings.api_v1_prefix)
-app.include_router(resumes.router, prefix=settings.api_v1_prefix)
-app.include_router(screening.router, prefix=settings.api_v1_prefix)
-app.include_router(interviews.router, prefix=settings.api_v1_prefix)
-app.include_router(email_automation.router, prefix=settings.api_v1_prefix)
-
-
+cors_origins = {origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()}
+cors_origins.update({"http://localhost:5173", "http://127.0.0.1:5173"})
+app.add_middleware(CORSMiddleware, allow_origins=sorted(cors_origins), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.include_router(auth.router, prefix=settings.api_v1_prefix)
+app.include_router(portal.router, prefix=settings.api_v1_prefix)
+hr_guard = [Depends(require_hr)]
+app.include_router(jobs.router, prefix=settings.api_v1_prefix, dependencies=hr_guard)
+app.include_router(candidates.router, prefix=settings.api_v1_prefix, dependencies=hr_guard)
+app.include_router(applications.router, prefix=settings.api_v1_prefix, dependencies=hr_guard)
+app.include_router(resumes.router, prefix=settings.api_v1_prefix, dependencies=hr_guard)
+app.include_router(screening.router, prefix=settings.api_v1_prefix, dependencies=hr_guard)
+app.include_router(interviews.router, prefix=settings.api_v1_prefix, dependencies=hr_guard)
+app.include_router(email_automation.router, prefix=settings.api_v1_prefix, dependencies=hr_guard)
 @app.exception_handler(SQLAlchemyError)
-async def handle_database_error(
-    _: Request,
-    exc: SQLAlchemyError,
-) -> JSONResponse:
+async def handle_database_error(_: Request, exc: SQLAlchemyError) -> JSONResponse:
     logger.exception("Database operation failed: %s", exc)
-    return JSONResponse(
-        status_code=503,
-        content={"detail": "Database operation failed; check database availability"},
-    )
-
-
+    return JSONResponse(status_code=503, content={"detail":"Database operation failed; check database availability"})
 @app.get("/", tags=["health"])
 async def home() -> dict[str, str]:
-    return {
-        "message": "AI-Powered HR Hiring Automation API",
-        "documentation": "/docs",
-    }
-
-
+    return {"message":"AI-Powered HR Hiring Automation API","documentation":"/docs"}
 @app.get("/health", tags=["health"])
 def health_check() -> dict[str, str]:
-    """Report healthy only when the configured database accepts a query."""
     try:
-        with get_engine().connect() as connection:
-            connection.execute(text("SELECT 1"))
+        with get_engine().connect() as connection: connection.execute(text("SELECT 1"))
     except (DatabaseConfigurationError, SQLAlchemyError):
         logger.exception("Health check failed because the database is unavailable.")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database is unavailable. Check DATABASE_URL and database service.",
-        ) from None
-    return {"status": "ok", "database": "connected"}
+        raise HTTPException(status_code=503, detail="Database is unavailable. Check DATABASE_URL and database service.") from None
+    return {"status":"ok","database":"connected"}
