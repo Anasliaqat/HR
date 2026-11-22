@@ -104,7 +104,26 @@ The application uses ElevenLabs Conversational AI for outbound candidate calls. 
 
 1. Set `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, and `ELEVENLABS_AGENT_PHONE_NUMBER_ID` in `backend/.env`. The phone-number ID is the ID of the phone number connected to the agent in ElevenLabs, not the public phone number itself.
 2. In ElevenLabs, configure the HR Screening Assistant agent with dynamic variables: `company_name`, `candidate_name`, `job_title`, `job_description`, `required_skills`, and `screening_questions`. Use these in the agent prompt. The backend supplies the values for every call, including ZETECH as the company.
-3. The agent must identify itself as an AI assistant, ask for explicit consent before screening/transcription/recording, and stop immediately if consent is declined or unclear. Ask the configured screening questions one at a time. Do not make hiring decisions or assess accent, voice, emotion, personality, or protected traits.
+3. The agent must identify itself as an AI assistant, ask for explicit consent before screening, transcription, and AI summarization, and stop immediately if consent is declined or unclear. Audio recording is disabled. Ask the configured screening questions one at a time. Do not make hiring decisions or assess accent, voice, emotion, personality, or protected traits.
+
+   Use this as the agent's system prompt (keep the dynamic variable names exactly as shown):
+
+   ```text
+   You are the AI HR Screening Assistant for {{company_name}}. Speak in simple, clear, professional English. You are calling {{candidate_name}} about the {{job_title}} position.
+
+   Job description: {{job_description}}
+   Required skills: {{required_skills}}
+
+   First introduce yourself as an AI assistant. Explain that this call is for an initial job screening and that the conversation will be transcribed and summarized by AI for HR review. Audio recording is disabled. Ask: "Do you consent to continue with this screening and its transcription and AI summary?"
+
+   If the candidate says no, is unsure, or withdraws consent, politely thank them and end the call immediately. Do not ask screening questions without clear consent.
+
+   If the candidate agrees, ask these questions one at a time, in order, and allow time for each answer:
+   {{screening_questions}}
+
+   Ask only one brief job-related clarification when needed. Do not score, rank, hire, reject, or promise an interview. Do not judge accent, voice, emotion, personality, age, gender, race, religion, disability, or any protected trait. Never ask about protected traits. Keep the call respectful and concise.
+   ```
+
 4. In ElevenLabs workspace **Developers / Webhooks** (or ElevenAgents settings), create an HMAC-authenticated post-call webhook pointing to `https://<your-public-host>/api/screening/webhook`. Enable the **transcript** event (`post_call_transcription`) and the **call initiation failure** event. Copy the generated webhook secret into `ELEVENLABS_WEBHOOK_SECRET`. The API verifies the `ElevenLabs-Signature` header and timestamp before processing. Configure retries so temporary backend failures can be redelivered.
 5. The screening dashboard calls the outbound-call API. ElevenLabs returns a `conversation_id`, which is stored in the screening record. The signed webhook later updates call status, transcript, job-related summary, and answers. Transcript storage and AI summarization occur only when affirmative consent is detected in the candidate's transcript. Audio/recording links are not stored by this integration.
 6. Use an HTTPS tunnel such as ngrok for local webhook testing. Test only with a phone number you control. Do not commit API keys or webhook secrets.
