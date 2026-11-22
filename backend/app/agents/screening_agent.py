@@ -6,6 +6,8 @@ import re
 
 from pydantic import BaseModel, Field
 
+from app.config import settings
+
 from app.models.candidate import Candidate
 from app.models.job import Job
 
