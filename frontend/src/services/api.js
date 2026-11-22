@@ -40,6 +40,7 @@ export const api = {
   verifyHr: (payload) => client.post("/auth/hr/verify", payload).then(({ data }) => data),
   getPublicJobs: () => client.get("/portal/jobs").then(({ data }) => data),
   applyForJob: (payload) => client.post("/portal/applications", payload).then(({ data }) => data),
+  uploadMyResume: (applicationId, file) => { const body = new FormData(); body.append("file", file); return client.post(`/portal/applications/${applicationId}/resume`, body).then(({ data }) => data); },
   getMyApplications: () => client.get("/portal/applications").then(({ data }) => data),
   health: () => client.get("/health", { baseURL: "" }).then(({ data }) => data),
   getJobs: () => client.get("/jobs").then(({ data }) => data),
