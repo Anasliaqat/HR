@@ -81,6 +81,7 @@ def init_db() -> None:
             migrate_resume_columns(engine)
             migrate_email_automation_columns(engine)
             migrate_screening_columns(engine)
+            migrate_auth_columns(engine)
             return
         except OperationalError:
             if attempt == INIT_DB_MAX_ATTEMPTS:
@@ -232,3 +233,24 @@ def migrate_screening_columns(engine: Engine) -> None:
                 "ON screenings (call_id) WHERE call_id IS NOT NULL"
             )
         )
+
+
+def migrate_auth_columns(engine: Engine) -> None:
+    """Add nullable candidate credentials and HR verification fields without data loss."""
+    additions = {
+        "candidates": {"password_hash": "VARCHAR(255)"},
+        "users": {
+            "is_verified": "BOOLEAN NOT NULL DEFAULT TRUE",
+            "verification_code_hash": "VARCHAR(64)",
+            "verification_expires_at": "TIMESTAMP",
+        },
+    }
+    with engine.begin() as connection:
+        inspector = inspect(connection)
+        for table_name, columns in additions.items():
+            existing = {column["name"] for column in inspector.get_columns(table_name)}
+            for column_name, definition in columns.items():
+                if column_name not in existing:
+                    connection.execute(text(
+                        f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}"
+                    ))
