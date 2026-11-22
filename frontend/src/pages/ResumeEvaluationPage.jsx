@@ -20,6 +20,14 @@ import {
   StatusBadge,
 } from "../components/Feedback";
 
+const RUBRIC_WEIGHTS = {
+  required_skills: 40,
+  relevant_experience: 25,
+  projects: 20,
+  education_and_certifications: 10,
+  other_relevant_evidence: 5,
+};
+
 function matchLabel(score) {
   if (score >= 80) return "Strong Match";
   if (score >= 60) return "Partial Match";
@@ -956,12 +964,21 @@ export default function ResumeEvaluationPage() {
                 {Object.keys(evaluation.rubric_scores ?? {}).length > 0 && (
                   <div className="rubric-grid">
                     {Object.entries(evaluation.rubric_scores).map(
-                      ([name, score]) => (
-                        <div className="rubric-item" key={name}>
-                          <span>{name.replaceAll("_", " ")}</span>
-                          <strong>{score}</strong>
-                        </div>
-                      ),
+                      ([name, score]) => {
+                        const excluded = (
+                          evaluation.excluded_rubric_categories ?? []
+                        ).includes(name);
+                        return (
+                          <div className="rubric-item" key={name}>
+                            <span>{name.replaceAll("_", " ")}</span>
+                            <strong>
+                              {excluded
+                                ? "Not weighted"
+                                : `${score} / ${RUBRIC_WEIGHTS[name] ?? 100}`}
+                            </strong>
+                          </div>
+                        );
+                      },
                     )}
                   </div>
                 )}
