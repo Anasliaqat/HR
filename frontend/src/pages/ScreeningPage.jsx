@@ -142,7 +142,7 @@ export default function ScreeningPage() {
   }, [report?.status, screeningId, selectedCandidate?.id]);
 
   async function startCall() {
-    if (!selectedApplication || !selectedCandidate || !consentConfirmed) return;
+    if (!selectedApplication || !selectedCandidate) return;
     setStarting(true);
     setError("");
     setNotice("");
@@ -246,7 +246,7 @@ export default function ScreeningPage() {
             </button>
             <p className="form-note">
               No phone number is required. The candidate starts the session from their portal and confirms consent with the assistant.
-            </p>p>
+            </p>
             {session && report?.id && <BrowserConversation screeningId={report.id} session={session} onFinished={refreshReport} />}
           </Panel>
 
