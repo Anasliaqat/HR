@@ -4,9 +4,10 @@ from contextlib import asynccontextmanager
 import logging
 from collections.abc import AsyncGenerator
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api import (
@@ -19,7 +20,11 @@ from app.api import (
     screening,
 )
 from app.config import settings
-from app.database.connection import init_db
+from app.database.connection import (
+    DatabaseConfigurationError,
+    get_engine,
+    init_db,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,5 +84,15 @@ async def home() -> dict[str, str]:
 
 
 @app.get("/health", tags=["health"])
-async def health_check() -> dict[str, str]:
-    return {"status": "ok"}
+def health_check() -> dict[str, str]:
+    """Report healthy only when the configured database accepts a query."""
+    try:
+        with get_engine().connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except (DatabaseConfigurationError, SQLAlchemyError):
+        logger.exception("Health check failed because the database is unavailable.")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is unavailable. Check DATABASE_URL and database service.",
+        ) from None
+    return {"status": "ok", "database": "connected"}
