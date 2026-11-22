@@ -1,4 +1,4 @@
-"""Job-related, human-reviewed Vapi screening assistant behavior."""
+"""Job-related, human-reviewed ElevenLabs screening assistant behavior."""
 
 import json
 import logging
@@ -112,38 +112,39 @@ def build_call_prompt(job: Job) -> str:
     )
 
 
-def build_vapi_call_payload(
+def build_elevenlabs_call_payload(
     candidate: Candidate,
     job: Job,
     screening_id: str,
 ) -> dict[str, object]:
-    """Build an outbound call using only required candidate/job details."""
-    if not settings.vapi_assistant_id or not settings.vapi_phone_number_id:
+    """Build a per-candidate ElevenLabs call with the app's dynamic context."""
+    if not settings.elevenlabs_agent_id or not settings.elevenlabs_agent_phone_number_id:
         raise RuntimeError(
-            "VAPI_ASSISTANT_ID and VAPI_PHONE_NUMBER_ID must be configured."
+            "ELEVENLABS_AGENT_ID and ELEVENLABS_AGENT_PHONE_NUMBER_ID must be configured."
         )
     if not candidate.phone:
         raise ValueError("Candidate must have a phone number before screening.")
 
+    questions = "\\n".join(
+        f"{index}. {question}"
+        for index, question in enumerate(SCREENING_QUESTIONS, start=1)
+    )
     return {
-        "assistantId": settings.vapi_assistant_id,
-        "phoneNumberId": settings.vapi_phone_number_id,
-        "name": f"HR screening {screening_id}",
-        "customer": {"number": candidate.phone},
-        "assistantOverrides": {
-            "firstMessage": (
-                "Hello. I am an AI assistant calling for an initial job screening. "
-                "This call may be recorded and will be transcribed and summarized by "
-                "AI for HR review. Do you consent to continue with the screening?"
-            ),
-            "model": {
-                "messages": [
-                    {"role": "system", "content": build_call_prompt(job)}
-                ]
-            },
+        "agent_id": settings.elevenlabs_agent_id,
+        "agent_phone_number_id": settings.elevenlabs_agent_phone_number_id,
+        "to_number": candidate.phone,
+        "conversation_initiation_client_data": {
+            "dynamic_variables": {
+                "company_name": "ZETECH",
+                "candidate_name": candidate.full_name[:200],
+                "job_title": job.title[:200],
+                "job_description": job.description[:4000],
+                "required_skills": ", ".join(job.required_skills[:50]),
+                "screening_questions": questions,
+                "screening_id": screening_id,
+            }
         },
     }
-
 
 def summarize_screening(transcript: str, job: Job) -> ScreeningSummary:
     """Create a factual structured summary; never infer personality or suitability."""
