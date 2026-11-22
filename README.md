@@ -46,11 +46,10 @@ Edit `backend/.env` and set a non-empty `POSTGRES_PASSWORD` and `DATABASE_URL`. 
 postgresql+psycopg://<user>:<url-encoded-password>@localhost:5432/<database>
 ```
 
-For ElevenLabs screening, set `ELEVENLABS_API_KEY`, `ELEVENLABS_ASSISTANT_ID`,
-`ELEVENLABS_PHONE_NUMBER_ID`, `ELEVENLABS_PUBLIC_PHONE_NUMBER`, `PHONE_DEFAULT_REGION`,
-and a long random `ELEVENLABS_WEBHOOK_SECRET` in `backend/.env`. These are
-server-side settings only; never put the private key or webhook secret in the
-React environment.
+For browser-based ElevenLabs screening, set `ELEVENLABS_API_KEY`,
+`ELEVENLABS_AGENT_ID`, and `ELEVENLABS_WEBHOOK_SECRET` in
+`backend/.env`. No phone number, Twilio account, or telephony integration
+is required. Keep the API key and webhook secret on the backend only.
 
 Start PostgreSQL from the project root, loading the backend environment file for Compose variable substitution:
 
@@ -98,37 +97,18 @@ ALTER TABLE interviews ADD COLUMN test_mode BOOLEAN NOT NULL DEFAULT TRUE;
 
 Use a migration tool for schema changes to databases with existing data.
 
-## ElevenLabs voice screening configuration
+## ElevenLabs browser screening configuration
 
-The application uses ElevenLabs Conversational AI for outbound candidate calls. Import or connect a Twilio phone number inside ElevenLabs and assign it to the screening agent. Store all credentials only in `backend/.env`.
+Screening runs inside the candidate or HR browser using ElevenLabs WebRTC voice. Candidates can also type messages in the same conversation. No outbound phone call or Twilio number is used.
 
-1. Set `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, and `ELEVENLABS_AGENT_PHONE_NUMBER_ID` in `backend/.env`. The phone-number ID is the ID of the phone number connected to the agent in ElevenLabs, not the public phone number itself.
-2. In ElevenLabs, configure the HR Screening Assistant agent with dynamic variables: `company_name`, `candidate_name`, `job_title`, `job_description`, `required_skills`, and `screening_questions`. Use these in the agent prompt. The backend supplies the values for every call, including ZETECH as the company.
-3. The agent must identify itself as an AI assistant, ask for explicit consent before screening, transcription, and AI summarization, and stop immediately if consent is declined or unclear. Audio recording is disabled. Ask the configured screening questions one at a time. Do not make hiring decisions or assess accent, voice, emotion, personality, or protected traits.
+1. Set `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, and `ELEVENLABS_WEBHOOK_SECRET` in `backend/.env`. The agent must be private/authenticated because FastAPI creates a short-lived conversation token for each authorized session.
+2. In the ElevenLabs agent's **Security** settings, enable the **System prompt** and **First message** overrides. Configure the agent to support voice conversations and text input. The React SDK passes the following runtime dynamic variables for every session: `company_name`, `candidate_name`, `job_title`, `job_description`, `required_skills`, `screening_questions`, and `screening_id`. Use these names in your agent prompt.
+3. The assistant must identify itself as AI and ask the candidate for clear verbal consent to AI screening, transcription, and AI summarization before asking any screening questions. Audio recording is not enabled. If consent is declined, unclear, or withdrawn, stop the conversation immediately. Ask the seven screening questions one at a time. Do not score, rank, hire, reject, promise an interview, or evaluate protected characteristics.
+4. In ElevenLabs **Developers / Webhooks**, create a signed post-call webhook at `https://<your-public-host>/api/screening/webhook`. Enable `post_call_transcription`, copy the webhook secret into `ELEVENLABS_WEBHOOK_SECRET`, and keep the endpoint publicly reachable over HTTPS. The backend validates the ElevenLabs signature and only stores the transcript and generates a summary after affirmative consent is found in the transcript.
+5. HR creates a screening record from the Screening page. The candidate signs in to the Candidate Portal and clicks **Open screening session**. HR can also start a test session from the Screening page. Both use the same authenticated backend token flow. The backend associates the conversation ID with the existing screening database record; the post-call webhook then saves status, transcript, summary, answers, and interview availability.
+6. Browser voice requires microphone permission and a secure context (HTTPS in production; localhost is suitable for development). Text messages can be sent in the active voice conversation as an alternative when speaking is inconvenient. ElevenLabs usage still consumes the account's applicable plan credits; avoiding Twilio does not make ElevenLabs processing unlimited or free.
 
-   Use this as the agent's system prompt (keep the dynamic variable names exactly as shown):
-
-   ```text
-   You are the AI HR Screening Assistant for {{company_name}}. Speak in simple, clear, professional English. You are calling {{candidate_name}} about the {{job_title}} position.
-
-   Job description: {{job_description}}
-   Required skills: {{required_skills}}
-
-   First introduce yourself as an AI assistant. Explain that this call is for an initial job screening and that the conversation will be transcribed and summarized by AI for HR review. Audio recording is disabled. Ask: "Do you consent to continue with this screening and its transcription and AI summary?"
-
-   If the candidate says no, is unsure, or withdraws consent, politely thank them and end the call immediately. Do not ask screening questions without clear consent.
-
-   If the candidate agrees, ask these questions one at a time, in order, and allow time for each answer:
-   {{screening_questions}}
-
-   Ask only one brief job-related clarification when needed. Do not score, rank, hire, reject, or promise an interview. Do not judge accent, voice, emotion, personality, age, gender, race, religion, disability, or any protected trait. Never ask about protected traits. Keep the call respectful and concise.
-   ```
-
-4. In ElevenLabs workspace **Developers / Webhooks** (or ElevenAgents settings), create an HMAC-authenticated post-call webhook pointing to `https://<your-public-host>/api/screening/webhook`. Enable the **transcript** event (`post_call_transcription`) and the **call initiation failure** event. Copy the generated webhook secret into `ELEVENLABS_WEBHOOK_SECRET`. The API verifies the `ElevenLabs-Signature` header and timestamp before processing. Configure retries so temporary backend failures can be redelivered.
-5. The screening dashboard calls the outbound-call API. ElevenLabs returns a `conversation_id`, which is stored in the screening record. The signed webhook later updates call status, transcript, job-related summary, and answers. Transcript storage and AI summarization occur only when affirmative consent is detected in the candidate's transcript. Audio/recording links are not stored by this integration.
-6. Use an HTTPS tunnel such as ngrok for local webhook testing. Test only with a phone number you control. Do not commit API keys or webhook secrets.
-
-The backend uses the [ElevenLabs outbound Twilio call API](https://elevenlabs.io/docs/api-reference/twilio/outbound-call) and [post-call webhooks](https://elevenlabs.io/docs/eleven-agents/workflows/post-call-webhooks). The imported phone number must be connected to the agent and enabled for outbound calling. Account, agent, and telephony permissions or plan limits may affect call availability.
+For local webhook testing, expose the backend through an HTTPS tunnel and configure that public URL in ElevenLabs. Never put the ElevenLabs API key in React environment variables or commit secrets.
 
 ## Interview scheduling setup
 
