@@ -42,6 +42,7 @@ class EmailApplicationResponse(BaseModel):
     job_id: UUID
     job_title: str
     cv_score: int | None
+    cv_summary: str | None = None
     score_action: str | None
     application_status: str
     matched_skills: list[str]
