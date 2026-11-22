@@ -45,6 +45,13 @@ def classify_score(
         return "hr_review"
     if required_skills and matched_skills is not None and not matched_skills:
         return "hr_review"
+    # Unknown/empty evaluation evidence must never trigger automatic rejection.
+    # A non-empty matched-skill list is the minimum positive evidence when the
+    # evaluator does not provide the richer evidence fields.
+    if has_relevant_evidence is None and not matched_skills:
+        return "hr_review"
+    if matched_skills is None and has_relevant_evidence is not True:
+        return "hr_review"
 
     return "automatic_rejection" if score <= threshold else "hr_review"
 
