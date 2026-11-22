@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../services/api";
 export default function CandidatePortalPage(){
- const [jobs,setJobs]=useState([]),[applications,setApplications]=useState([]),[selected,setSelected]=useState(""),[phone,setPhone]=useState(""),[details,setDetails]=useState(""),[consent,setConsent]=useState(false),[message,setMessage]=useState(""),[error,setError]=useState("");
+ const [jobs,setJobs]=useState([]),[applications,setApplications]=useState([]),[selected,setSelected]=useState(""),[phone,setPhone]=useState(""),[details,setDetails]=useState(""),[consent,setConsent]=useState(false),[resume,setResume]=useState(null),[message,setMessage]=useState(""),[error,setError]=useState("");
  async function load(){try{const [j,a]=await Promise.all([api.getPublicJobs(),api.getMyApplications()]);setJobs(j);setApplications(a);}catch(e){setError(e.message);}}
  useEffect(()=>{load();},[]);
  async function apply(e){e.preventDefault();setError("");setMessage("");try{const application=await api.applyForJob({job_id:selected,phone,details:details?{notes:details}:{},email_consent:consent});if(resume) await api.uploadMyResume(application.id,resume);setMessage("Application submitted.");setSelected("");setResume(null);await load();}catch(e){setError(e.message);}}
