@@ -85,14 +85,14 @@ def create_application(
 @pytest.mark.parametrize(
     ("score", "expected"),
     [
-        (49, "low_score_review"),
-        (50, "hr_review"),
+        (0, "automatic_rejection"),
+        (49, "automatic_rejection"),
+        (50, "automatic_rejection"),
+        (51, "hr_review"),
         (60, "hr_review"),
-        (61, "hr_decision"),
-        (69, "hr_decision"),
-        (70, "interview_eligible"),
-        (90, "interview_eligible"),
-        (91, "hr_review"),
+        (70, "hr_review"),
+        (90, "hr_review"),
+        (100, "hr_review"),
     ],
 )
 def test_score_boundaries_follow_configured_conservative_defaults(
@@ -110,7 +110,7 @@ def test_missing_match_evidence_does_not_count_as_no_skill_match() -> None:
     ) == "hr_review"
 
 
-def test_low_score_stays_pending_for_hr_and_does_not_send_email(
+def test_low_score_is_auto_rejected_and_email_attempt_is_logged(
     db_session: Session,
 ) -> None:
     application, resume = create_application(
@@ -118,9 +118,11 @@ def test_low_score_stays_pending_for_hr_and_does_not_send_email(
     )
     apply_resume_score_outcome(db_session, resume)
     db_session.refresh(application)
-    assert application.status == "pending_review"
-    assert application.agent_review_reason is None
-    assert db_session.scalar(select(EmailLog)) is None
+    assert application.status == "rejected"
+    email_log = db_session.scalar(select(EmailLog))
+    assert email_log is not None
+    assert email_log.email_type == "rejection"
+    assert email_log.status in {"sent", "failed"}
 
 
 def test_review_score_stays_pending_without_sending_email(
@@ -552,18 +554,14 @@ def test_hr_decision_and_history_api_preserve_consent_gate(
     ).status_code == 410
 
 
-def test_low_score_requires_hr_decision_before_rejection_email(
+def test_low_score_is_automatically_rejected_and_email_attempt_is_logged(
     api_client: TestClient,
 ) -> None:
     candidate_response = api_client.post(
         "/api/candidates",
-        json={"full_name": "Taylor Candidate", "email": "taylor@example.com"},
+        json={"full_name": "Taylor Candidate", "email": "taylor@example.com", "email_consent": True},
     )
     candidate_id = candidate_response.json()["id"]
-    api_client.put(
-        f"/api/candidates/{candidate_id}/email-consent",
-        json={"email_consent": True},
-    )
     job_response = api_client.post(
         "/api/jobs",
         json={
@@ -586,11 +584,8 @@ def test_low_score_requires_hr_decision_before_rejection_email(
             job_id=UUID(job_id),
             file_name="candidate.pdf",
             file_path="candidate.pdf",
-            score=45,
-            evaluation_details={
-                "matched_skills": [],
-                "missing_required_skills": ["Python"],
-            },
+            score=50,
+            evaluation_details={"matched_skills": ["Python"]},
             evaluation_status="completed",
         )
         db.add(resume)
@@ -599,16 +594,11 @@ def test_low_score_requires_hr_decision_before_rejection_email(
 
     dashboard = api_client.get("/api/email-automation/applications")
     assert dashboard.status_code == 200
-    assert dashboard.json()[0]["score_action"] == "low_score_review"
-    assert dashboard.json()[0]["application_status"] == "pending_review"
-    assert api_client.get("/api/email-automation/history").json() == []
-
-    decision = api_client.post(
-        f"/api/email-automation/applications/{application_id}/decision",
-        json={"decision": "reject"},
-    )
-    assert decision.status_code == 200
-    assert decision.json()["email_type"] == "rejection"
-    assert decision.json()["status"] == "failed"
-    assert "Configure SMTP_HOST" in decision.json()["error_message"]
-    assert api_client.get(f"/api/applications/{application_id}").json()["status"] == "rejected_by_hr"
+    assert dashboard.json()[0]["score_action"] == "automatic_rejection"
+    assert dashboard.json()[0]["application_status"] == "rejected"
+    history = api_client.get("/api/email-automation/history").json()
+    assert len(history) == 1
+    assert history[0]["email_type"] == "rejection"
+    assert history[0]["status"] == "failed"
+    assert "Configure SMTP_HOST" in history[0]["error_message"]
+    assert api_client.get(f"/api/applications/{application_id}").json()["status"] == "rejected"
