@@ -161,65 +161,6 @@ def _matching_application(
     return next(iter(unique_applications.values())) if len(unique_applications) == 1 else None
 
 
-def _handle_assistant_request(
-    message: dict[str, Any],
-    call: dict[str, Any],
-    db: Session,
-) -> dict[str, Any]:
-    if not settings.elevenlabs_agent_id:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="ELEVENLABS_ASSISTANT_ID is not configured",
-        )
-
-    call_id = call.get("id")
-    if isinstance(call_id, str):
-        existing = db.scalar(select(Screening).where(Screening.call_id == call_id))
-        if existing is not None:
-            return {"status": "ok"}
-
-    caller_number = _caller_number(message, call)
-    normalized_caller = normalize_phone_number(
-        caller_number, settings.phone_default_region
-    )
-    if normalized_caller is not None and isinstance(call_id, str):
-        candidates = db.scalars(select(Candidate).where(Candidate.phone.is_not(None)))
-        matching_candidates = [
-            candidate
-            for candidate in candidates
-            if normalize_phone_number(
-                candidate.phone, settings.phone_default_region
-            )
-            == normalized_caller
-        ]
-        if len(matching_candidates) == 1:
-            candidate = matching_candidates[0]
-            application = _matching_application(db, candidate)
-            if application is not None:
-                screening = Screening(
-                    candidate_id=candidate.id,
-                    application_id=application.id,
-                    call_id=call_id,
-                    call_status="queued",
-                    started_at=_parse_event_datetime(call.get("startedAt")),
-                )
-                db.add(screening)
-                try:
-                    db.commit()
-                except IntegrityError:
-                    db.rollback()
-                    existing = db.scalar(
-                        select(Screening).where(Screening.call_id == call_id)
-                    )
-                    if existing is None:
-                        raise
-        else:
-            logger.info(
-                "Inbound ElevenLabs call is not uniquely attributable; no candidate context was provided."
-            )
-    return {"status": "ok"}
-
-
 @router.post(
     "/{candidate_id}/start",
     response_model=ScreeningResponse,
