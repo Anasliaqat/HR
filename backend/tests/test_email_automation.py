@@ -148,7 +148,7 @@ def test_eligible_score_does_not_send_selection_email_automatically(
 
 
 
-def test_no_required_skill_match_routes_to_agent_review_without_email(
+def test_no_required_skill_match_is_flagged_for_hr_without_email(
     db_session: Session,
 ) -> None:
     application, resume = create_application(
@@ -160,11 +160,9 @@ def test_no_required_skill_match_routes_to_agent_review_without_email(
     apply_resume_score_outcome(db_session, resume)
 
     db_session.refresh(application)
-    email_log = db_session.scalar(select(EmailLog))
-    assert application.status == "rejected_by_agent"
-    assert "No required job skills were matched" in application.agent_review_reason
-    assert email_log is not None
-    assert email_log.email_type == "rejection"
+    assert application.status == "pending_review"
+    assert application.agent_review_reason is None
+    assert db_session.scalar(select(EmailLog)) is None
 
 
 def test_explicitly_empty_relevance_evidence_routes_to_agent_review(
@@ -283,6 +281,56 @@ def test_agent_review_cancellation_notice_does_not_email_candidate(
 
     assert result.status == "sent"
     assert [delivery[0] for delivery in deliveries] == ["manager@example.com"]
+
+
+
+def test_gmail_smtp_uses_starttls_login_and_configured_sender(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    application, _ = create_application(db_session, score=75)
+    preview = build_email_preview(application, "selection")
+    calls: dict[str, object] = {}
+
+    class FakeSMTP:
+        def __init__(self, host: str, port: int, timeout: int) -> None:
+            calls["connection"] = (host, port, timeout)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def ehlo(self) -> None:
+            calls["ehlo"] = True
+
+        def starttls(self, context) -> None:
+            calls["starttls"] = context is not None
+
+        def login(self, username: str, password: str) -> None:
+            calls["login"] = (username, password)
+
+        def send_message(self, message) -> None:
+            calls["message"] = message
+
+    monkeypatch.setattr(settings, "smtp_host", "smtp.gmail.com")
+    monkeypatch.setattr(settings, "smtp_port", 587)
+    monkeypatch.setattr(settings, "smtp_user", "hr@example.com")
+    monkeypatch.setattr(settings, "smtp_password", "test-app-password")
+    monkeypatch.setattr(settings, "smtp_from_email", "hr@example.com")
+    monkeypatch.setattr(email_automation_service.smtplib, "SMTP", FakeSMTP)
+
+    message_id = email_automation_service._deliver(preview, "test-key")
+
+    assert calls["connection"] == ("smtp.gmail.com", 587, 20)
+    assert calls["starttls"] is True
+    assert calls["login"] == ("hr@example.com", "test-app-password")
+    message = calls["message"]
+    assert message["From"] == "hr@example.com"
+    assert message["To"] == "taylor@example.com"
+    assert message["Subject"] == preview.subject
+    assert message_id == message["Message-ID"]
 
 
 def test_real_delivery_configuration_failure_is_persisted_for_retry(
