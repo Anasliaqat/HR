@@ -333,6 +333,58 @@ def test_gmail_smtp_uses_starttls_login_and_configured_sender(
     assert message_id == message["Message-ID"]
 
 
+
+def test_interview_notifications_use_the_same_gmail_smtp_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: dict[str, object] = {}
+
+    class FakeSMTP:
+        def __init__(self, host: str, port: int, timeout: int) -> None:
+            calls["connection"] = (host, port, timeout)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def ehlo(self) -> None:
+            return None
+
+        def starttls(self, context) -> None:
+            calls["starttls"] = context is not None
+
+        def login(self, username: str, password: str) -> None:
+            calls["login"] = (username, password)
+
+        def send_message(self, message) -> None:
+            calls["message"] = message
+
+    monkeypatch.setattr(settings, "scheduling_test_mode", False)
+    monkeypatch.setattr(settings, "smtp_host", "smtp.gmail.com")
+    monkeypatch.setattr(settings, "smtp_port", 587)
+    monkeypatch.setattr(settings, "smtp_user", "hr@example.com")
+    monkeypatch.setattr(settings, "smtp_password", "test-app-password")
+    monkeypatch.setattr(settings, "smtp_from_email", "hr@example.com")
+    monkeypatch.setattr(email_service.smtplib, "SMTP", FakeSMTP)
+
+    message_id = email_service._send_email(
+        "interviewer@example.com",
+        "Interview scheduled",
+        "Your interview has been scheduled.",
+        "interview-test-key",
+    )
+
+    message = calls["message"]
+    assert calls["connection"] == ("smtp.gmail.com", 587, 20)
+    assert calls["starttls"] is True
+    assert calls["login"] == ("hr@example.com", "test-app-password")
+    assert message["From"] == "hr@example.com"
+    assert message["To"] == "interviewer@example.com"
+    assert message_id == message["Message-ID"]
+
+
 def test_real_delivery_configuration_failure_is_persisted_for_retry(
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
