@@ -159,7 +159,7 @@ def start_screening(
         Screening.call_status.in_(_IN_PROGRESS_STATUSES),
     ))
     if active is not None:
-        raise HTTPException(status_code=409, detail="A screening session already exists for this application")
+        return _response(active)
     screening = Screening(
         candidate_id=candidate_id,
         application_id=application.id,
