@@ -61,6 +61,7 @@ export const api = {
       .put(`/candidates/${id}/email-consent`, { email_consent: emailConsent })
       .then(({ data }) => data),
   getApplications: () => client.get("/applications").then(({ data }) => data),
+  deleteApplication: (id) => client.delete(`/applications/${id}`),
   createApplication: (payload) =>
     client.post("/applications", payload).then(({ data }) => data),
   updateApplication: (id, payload) =>
@@ -79,6 +80,9 @@ export const api = {
     client.get(`/resumes/${id}/status`).then(({ data }) => data),
   getResumeScore: (id) =>
     client.get(`/resumes/${id}/score`).then(({ data }) => data),
+  getMyScreenings: () => client.get("/screening/candidate/my").then(({ data }) => data),
+  createBrowserSession: (screeningId, mode = "voice", candidate = false) => client.post(`${candidate ? "/screening/candidate" : "/screening"}/${screeningId}/session`, null, { params: { mode } }).then(({ data }) => data),
+  attachBrowserConversation: (screeningId, conversationId, candidate = false) => client.post(`${candidate ? "/screening/candidate" : "/screening"}/${screeningId}/conversation`, { conversation_id: conversationId }).then(({ data }) => data),
   getScreening: (candidateId) =>
     client.get(`/screening/${candidateId}`).then(({ data }) => data),
   getScreenings: () => client.get("/screening").then(({ data }) => data),

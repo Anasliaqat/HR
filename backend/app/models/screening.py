@@ -1,4 +1,4 @@
-"""Vapi screening call results."""
+"""ElevenLabs browser screening conversation results."""
 
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any

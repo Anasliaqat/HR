@@ -1,4 +1,4 @@
-"""Job-related, human-reviewed Vapi screening assistant behavior."""
+"""Job-related, human-reviewed ElevenLabs screening assistant behavior."""
 
 import json
 import logging
@@ -7,7 +7,7 @@ import re
 from pydantic import BaseModel, Field
 
 from app.config import settings
-from app.models.candidate import Candidate
+
 from app.models.job import Job
 
 logger = logging.getLogger(__name__)
@@ -36,15 +36,25 @@ _CONSENT_AFFIRM = re.compile(
     r"no problem|no worries|that's fine|that is fine|go ahead|please do)\b",
     re.IGNORECASE,
 )
+# Consent may be withdrawn at any point, not only in the first candidate turn.
+_CONSENT_WITHDRAWAL = re.compile(
+    r"\b(?:withdraw(?:ing)? (?:my )?consent|"
+    r"i no longer consent|i don't consent anymore|i do not consent anymore|"
+    r"stop (?:the )?(?:screening|transcription)|"
+    r"end (?:the )?(?:screening|conversation)|"
+    r"don't want (?:this|my answers) (?:recorded|transcribed|stored)|"
+    r"do not want (?:this|my answers) (?:recorded|transcribed|stored))\b",
+    re.IGNORECASE,
+)
 
-_SCREENING_INSTRUCTIONS = """You are an AI voice assistant conducting a short initial
-screening for a job application. Speak in simple, professional English and ask one
-question at a time. Identify yourself as an AI assistant and explain that this is an
-initial screening call for the stated job. Before asking screening questions, ask the
-candidate to confirm that they consent to this screening call, any configured call
-recording, transcription, and AI summarization for HR review. If the candidate declines,
+_SCREENING_INSTRUCTIONS = """You are an AI assistant conducting a short browser-based screening
+conversation for a job application. Speak in simple, professional English and ask one
+question at a time. Identify yourself as an AI assistant and explain this is an initial
+screening for the stated job. Before asking screening questions, ask the candidate to
+confirm consent to AI screening, transcription, and AI summarization for HR review.
+The app does not record or store audio. If the candidate declines,
 is unsure, or withdraws consent, politely end the
-call immediately without asking screening questions.
+conversation immediately without asking screening questions.
 
 After consent, ask each of the seven provided screening questions in their listed order.
 Allow the candidate time to answer and do not interrupt. Ask at most one brief,
@@ -73,16 +83,21 @@ class ScreeningSummary(BaseModel):
 
 
 def candidate_consented_on_call(transcript: str) -> bool | None:
-    """Return explicit consent from the first candidate turn, or None if unclear."""
-    match = _CONSENT_RESPONSE.search(transcript)
-    if not match:
+    """Return consent only if it was explicit and was not later withdrawn."""
+    matches = list(_CONSENT_RESPONSE.finditer(transcript))
+    if not matches:
         return None
-    response = match.group(1).strip()
-    if _CONSENT_DECLINE.search(response):
+
+    first_response = matches[0].group(1).strip()
+    if _CONSENT_DECLINE.search(first_response):
         return False
-    if _CONSENT_AFFIRM.search(response):
-        return True
-    return None
+    if not _CONSENT_AFFIRM.search(first_response):
+        return None
+
+    # A later withdrawal overrides an earlier affirmative response.
+    if any(_CONSENT_WITHDRAWAL.search(match.group(1)) for match in matches[1:]):
+        return False
+    return True
 
 
 def build_call_prompt(job: Job) -> str:
@@ -110,39 +125,6 @@ def build_call_prompt(job: Job) -> str:
         + context
         + "\nContinue to follow all screening and consent rules above."
     )
-
-
-def build_vapi_call_payload(
-    candidate: Candidate,
-    job: Job,
-    screening_id: str,
-) -> dict[str, object]:
-    """Build an outbound call using only required candidate/job details."""
-    if not settings.vapi_assistant_id or not settings.vapi_phone_number_id:
-        raise RuntimeError(
-            "VAPI_ASSISTANT_ID and VAPI_PHONE_NUMBER_ID must be configured."
-        )
-    if not candidate.phone:
-        raise ValueError("Candidate must have a phone number before screening.")
-
-    return {
-        "assistantId": settings.vapi_assistant_id,
-        "phoneNumberId": settings.vapi_phone_number_id,
-        "name": f"HR screening {screening_id}",
-        "customer": {"number": candidate.phone},
-        "assistantOverrides": {
-            "firstMessage": (
-                "Hello. I am an AI assistant calling for an initial job screening. "
-                "This call may be recorded and will be transcribed and summarized by "
-                "AI for HR review. Do you consent to continue with the screening?"
-            ),
-            "model": {
-                "messages": [
-                    {"role": "system", "content": build_call_prompt(job)}
-                ]
-            },
-        },
-    }
 
 
 def summarize_screening(transcript: str, job: Job) -> ScreeningSummary:

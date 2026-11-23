@@ -19,6 +19,7 @@ from app.config import settings
 from app.models.application import Application
 from app.models.email_log import EmailLog
 from app.models.interview import Interview
+from app.models.screening import Screening
 
 logger = logging.getLogger(__name__)
 EmailType = Literal[
@@ -74,7 +75,11 @@ def build_email_preview(
             "Your skills, qualifications, and experience have attracted our "
             "attention, and we would like to proceed with the next stage of our "
             "recruitment process.\n\n"
-            "Our HR team will coordinate the next steps with you.\n\n"
+            f"Open your ZETECH Candidate Portal to complete your initial AI screening: {settings.frontend_base_url.rstrip('/')}/candidate\n\n"
+            "This is a browser-based voice conversation, not a phone call. Open the link, sign in "
+            "with your candidate account, and select Start Screening. Allow microphone access; "
+            "you can also type your answers. The assistant asks for your consent before screening "
+            "and transcription begin.\n\n"
             "Congratulations, and thank you for your interest in ZETECH.\n\n"
             "Best Regards,\nHR Team\nZETECH"
         )
@@ -219,6 +224,18 @@ def send_application_email(
         raise EmailAutomationError(
             "A selection email requires a recorded HR approval."
         )
+
+    if email_type == "selection":
+        existing_screening = db.scalar(
+            select(Screening).where(Screening.application_id == application.id)
+        )
+        if existing_screening is None:
+            db.add(Screening(
+                candidate_id=application.candidate_id,
+                application_id=application.id,
+                call_status="queued",
+            ))
+            db.commit()
 
     preview = build_email_preview(application, email_type, interview)
     key = _idempotency_key(application, email_type, interview)

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { PhoneCall, RefreshCw, ShieldCheck } from "lucide-react";
+import { RefreshCw, ShieldCheck } from "lucide-react";
+import BrowserConversation from "../components/BrowserConversation";
 import { api } from "../services/api";
 import Panel from "../components/Panel";
 import {
@@ -27,7 +28,7 @@ export default function ScreeningPage() {
   const [screenings, setScreenings] = useState([]);
   const [applicationId, setApplicationId] = useState("");
   const [screeningId, setScreeningId] = useState("");
-  const [consentConfirmed, setConsentConfirmed] = useState(false);
+  const [session, setSession] = useState(null);
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
@@ -141,19 +142,19 @@ export default function ScreeningPage() {
   }, [report?.status, screeningId, selectedCandidate?.id]);
 
   async function startCall() {
-    if (!selectedApplication || !selectedCandidate || !consentConfirmed) return;
+    if (!selectedApplication || !selectedCandidate) return;
     setStarting(true);
     setError("");
     setNotice("");
     try {
       const result = await api.startScreening(selectedCandidate.id, {
         application_id: selectedApplication.id,
-        consent_confirmed: true,
       });
+      const browserSession = await api.createBrowserSession(result.id, "voice");
+      setSession(browserSession);
       setReport(result);
       setScreeningId(result.id);
-      setNotice("Call requested. This action starts a real outbound call when Vapi is configured.");
-      setConsentConfirmed(false);
+      setNotice("Browser screening session prepared. The candidate can also start it from their portal.");
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -198,7 +199,7 @@ export default function ScreeningPage() {
         <LoadingState label="Loading approved applications…" />
       ) : (
         <div className="content-grid content-grid-aside">
-          <Panel title="Start screening call" subtitle="Calls are initiated manually and require confirmed consent.">
+          <Panel title="Prepare browser screening" subtitle="HR approves the application; the candidate gives verbal consent when the browser conversation starts.">
             <label className="field-label" htmlFor="screening-application">
               Approved candidate and position
             </label>
@@ -209,7 +210,7 @@ export default function ScreeningPage() {
                 setApplicationId(event.target.value);
                 setReport(null);
                 setScreeningId("");
-                setConsentConfirmed(false);
+                setSession(null);
               }}
             >
               <option value="">Select an approved application</option>
@@ -231,40 +232,22 @@ export default function ScreeningPage() {
             {selectedCandidate && (
               <div className="candidate-brief">
                 <strong>{selectedCandidate.full_name}</strong>
-                <span>{selectedCandidate.phone || "Phone number missing"}</span>
+                <span>{selectedCandidate.email}</span>
                 <span>{selectedJob?.title}</span>
               </div>
             )}
-            <label className="consent-option">
-              <input
-                type="checkbox"
-                checked={consentConfirmed}
-                onChange={(event) => setConsentConfirmed(event.target.checked)}
-              />
-              <span>
-                I confirm the candidate consented to the screening call,
-                recording, transcription, and AI summary where configured.
-              </span>
-            </label>
             <button
               type="button"
               className="button button-primary full-width-button"
-              disabled={
-                !selectedApplication ||
-                !selectedCandidate?.hr_approved ||
-                !selectedCandidate?.phone ||
-                !consentConfirmed ||
-                starting
-              }
+              disabled={!selectedApplication || !selectedCandidate?.hr_approved || starting}
               onClick={startCall}
             >
-              <PhoneCall size={17} />
-              {starting ? "Requesting call…" : "Start screening call"}
+              {starting ? "Preparing session…" : "Prepare candidate screening"}
             </button>
             <p className="form-note">
-              Clicking starts a real call when Vapi credentials are configured.
-              Use a test number while developing.
+              No phone number is required. The candidate starts the session from their portal and confirms consent with the assistant.
             </p>
+            {session && report?.id && <BrowserConversation screeningId={report.id} session={session} onFinished={refreshReport} />}
           </Panel>
 
           <Panel
@@ -298,8 +281,6 @@ export default function ScreeningPage() {
                   </div>
                   <p className="muted-copy">
                     {report.job_title ?? selectedJob?.title ?? "Position unavailable"}
-                    {" · "}
-                    {report.phone ?? selectedCandidate?.phone ?? "Phone unavailable"}
                   </p>
                   <StatusBadge>{statusLabels[report.status] ?? report.status}</StatusBadge>
                 </div>
@@ -368,7 +349,7 @@ export default function ScreeningPage() {
         >
           {screenings.length === 0 ? (
             <EmptyState title="No screening calls recorded">
-              Calls are listed after a uniquely matched candidate calls the Vapi number.
+              Calls are listed after an invited candidate's ElevenLabs screening call is completed.
             </EmptyState>
           ) : (
             <div className="table-scroll">
@@ -377,7 +358,6 @@ export default function ScreeningPage() {
                   <tr>
                     <th>Candidate</th>
                     <th>Job title</th>
-                    <th>Phone number</th>
                     <th>Call status</th>
                     <th>Call date and time</th>
                     <th>Screening summary</th>
@@ -389,7 +369,6 @@ export default function ScreeningPage() {
                     <tr key={screening.id}>
                       <td>{screening.candidate_name}</td>
                       <td>{screening.job_title ?? "—"}</td>
-                      <td>{screening.phone ?? "—"}</td>
                       <td><StatusBadge>{statusLabels[screening.status] ?? screening.status}</StatusBadge></td>
                       <td>
                         {new Date(

@@ -8,7 +8,7 @@ The application currently supports these workflows:
 2. Public job browsing, candidate applications, and private application status.
 3. PDF/DOCX/TXT resume upload and local job-match scoring.
 4. HR review, configured low-score rejection, and consent-gated email delivery.
-5. Voice screening through the currently implemented Vapi integration and interview scheduling.
+5. Voice screening through ElevenLabs Conversational AI and interview scheduling.
 
 AI scores are advisory. The current email workflow automatically marks scores at or below the configured rejection threshold (default 50) as rejected and attempts a consent-gated rejection email. Other decisions remain with HR.
 
@@ -46,11 +46,10 @@ Edit `backend/.env` and set a non-empty `POSTGRES_PASSWORD` and `DATABASE_URL`. 
 postgresql+psycopg://<user>:<url-encoded-password>@localhost:5432/<database>
 ```
 
-For Vapi screening, set `VAPI_API_KEY`, `VAPI_ASSISTANT_ID`,
-`VAPI_PHONE_NUMBER_ID`, `VAPI_PUBLIC_PHONE_NUMBER`, `PHONE_DEFAULT_REGION`,
-and a long random `VAPI_WEBHOOK_SECRET` in `backend/.env`. These are
-server-side settings only; never put the private key or webhook secret in the
-React environment.
+For browser-based ElevenLabs screening, set `ELEVENLABS_API_KEY`,
+`ELEVENLABS_AGENT_ID`, and `ELEVENLABS_WEBHOOK_SECRET` in
+`backend/.env`. No phone number, Twilio account, or telephony integration
+is required. Keep the API key and webhook secret on the backend only.
 
 Start PostgreSQL from the project root, loading the backend environment file for Compose variable substitution:
 
@@ -98,53 +97,18 @@ ALTER TABLE interviews ADD COLUMN test_mode BOOLEAN NOT NULL DEFAULT TRUE;
 
 Use a migration tool for schema changes to databases with existing data.
 
-## Vapi screening configuration
+## ElevenLabs browser screening configuration
 
-This integration reuses the already-published assistant and phone number; it
-does not create or update an assistant. Store the private Vapi key, assistant
-ID, phone-number ID, and dialable number only in `backend/.env`. Keep the
-assistant's questions, prompt, transcriber, and voice configured in Vapi.
+Screening runs inside the candidate or HR browser using ElevenLabs WebRTC voice. Candidates can also type messages in the same conversation. No outbound phone call or Twilio number is used.
 
-1. Set `VAPI_API_KEY`, `VAPI_ASSISTANT_ID`, and `VAPI_PHONE_NUMBER_ID` to the
-   existing account values. Set `VAPI_PUBLIC_PHONE_NUMBER` to the dialable
-   inbound number in E.164 format, and `PHONE_DEFAULT_REGION` to the ISO
-   country code used for locally formatted candidate numbers.
-2. Set a random, private `VAPI_WEBHOOK_SECRET`. In the Vapi phone-number
-   settings, leave the fixed assistant assignment empty so Vapi sends an
-   `assistant-request`; configure the number's server URL as
-   `https://<your-public-host>/api/screening/webhook` and add the
-   `x-vapi-secret` HTTP header with the same secret. The webhook returns the
-   saved assistant ID, which preserves its existing voice and instructions.
-   Vapi requires an `assistant-request` response within 7.5 seconds.
-3. Configure the same server URL and header for call status and end-of-call
-   reports. The backend associates a call only when the caller's normalized
-   number maps to one candidate with exactly one eligible application and a
-   sent screening invitation. Calls with missing or duplicate matches still
-   use the existing assistant, but receive no candidate or job context and are
-   not saved against a candidate.
-4. An eligible CV score triggers the existing email delivery pipeline to send
-   a screening invitation only when the candidate has explicitly consented to
-   email and has a valid phone number. The invitation includes
-   `VAPI_PUBLIC_PHONE_NUMBER`; existing email idempotency prevents repeats.
-   Candidate numbers are normalized to E.164 with libphonenumber before
-   matching. HR can review inbound calls on the Screening page.
-5. The call webhook saves the transcript and summarizes answers only after
-   explicit consent is found in the transcript. A recording link is saved only
-   after that consent is confirmed. This code does not enable recording; if
-   recording is enabled in Vapi, ensure Vapi itself does not record before
-   consent or disable recording there.
-6. For local testing, expose the API through an HTTPS tunnel and configure the
-   public URL in Vapi. Do not test with production candidates. Tests use an
-   isolated SQLite database and mocked call/email providers; they do not place
-   calls or send emails.
+1. Set `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, and `ELEVENLABS_WEBHOOK_SECRET` in `backend/.env`. The agent must be private/authenticated because FastAPI creates a short-lived conversation token for each authorized session.
+2. In the ElevenLabs agent's **Security** settings, enable the **System prompt** and **First message** overrides. Configure the agent to support voice conversations and text input. The React SDK passes the following runtime dynamic variables for every session: `company_name`, `candidate_name`, `job_title`, `job_description`, `required_skills`, `screening_questions`, and `screening_id`. Use these names in your agent prompt.
+3. The assistant must identify itself as AI and ask the candidate for clear verbal consent to AI screening, transcription, and AI summarization before asking any screening questions. Audio recording is not enabled. If consent is declined, unclear, or withdrawn, stop the conversation immediately. Ask the seven screening questions one at a time. Do not score, rank, hire, reject, promise an interview, or evaluate protected characteristics.
+4. In ElevenLabs **Developers / Webhooks**, create a signed post-call webhook at `https://<your-public-host>/api/screening/webhook`. Enable `post_call_transcription`, copy the webhook secret into `ELEVENLABS_WEBHOOK_SECRET`, and keep the endpoint publicly reachable over HTTPS. The backend validates the ElevenLabs signature and only stores the transcript and generates a summary after affirmative consent is found in the transcript.
+5. When HR approves an application and sends the selection email, the backend creates a queued screening invitation. The email includes the Candidate Portal link. The candidate signs in and clicks **Start screening**; the Candidate Portal also refreshes screening invitations while it is open. HR can review the post-call summary, job-related highlights, answers, and transcript from the Screening page. The authenticated browser endpoint associates the conversation ID with the existing screening database record; the post-call webhook then saves status, transcript, summary, answers, and interview availability.
+6. Browser voice requires microphone permission and a secure context (HTTPS in production; localhost is suitable for development). Text messages can be sent in the active voice conversation as an alternative when speaking is inconvenient. ElevenLabs usage still consumes the account's applicable plan credits; avoiding Twilio does not make ElevenLabs processing unlimited or free.
 
-See Vapi's official [server events](https://docs.vapi.ai/server-url/events),
-[server URL setup](https://docs.vapi.ai/server-url/setting-server-urls), and
-[phone-number API](https://docs.vapi.ai/api-reference/phone-numbers/get).
-The authenticated webhook processes the documented `assistant-request`,
-`status-update`, and `end-of-call-report` events. Existing assistant dynamic
-variables are not overwritten; Vapi's documented `assistant-request` response
-selects the saved assistant only.
+For local webhook testing, expose the backend through an HTTPS tunnel and configure that public URL in ElevenLabs. Never put the ElevenLabs API key in React environment variables or commit secrets.
 
 ## Interview scheduling setup
 
@@ -175,8 +139,9 @@ Open `http://127.0.0.1:8000/docs` to try the endpoints interactively:
 - `POST /api/applications`, `GET /api/applications`, `GET/PATCH/DELETE /api/applications/{application_id}` — link a candidate with a job and manage its HR-tracked status.
 - `GET /api/resumes`, `POST /api/resumes/upload`, `DELETE /api/resumes/{resume_id}` — list resume evaluation records, upload, and remove a PDF, DOCX, or TXT resume as multipart form data with `candidate_id`, selected `job_id`, and `file`. Uploads are limited to 10 MB; scanned/image-only PDFs require OCR before upload.
 - `POST /api/resumes/{resume_id}/evaluate`, `GET /api/resumes/{resume_id}/score` — parse a resume, score job-related evidence using the 40/25/20/10/5 rubric, and return a structured result for manual HR review. The selected job is stored on the resume; application-linked resumes must use the application's job. Results, extracted text, status, evidence, and rubric breakdown are stored in PostgreSQL. Scoring and explanations run locally; CV content is not sent to a paid LLM.
-- `POST /api/screening/{candidate_id}/start`, `GET /api/screening/{candidate_id}`, `GET /api/screening`, `GET /api/screening/records/{screening_id}` — manually initiate a consent-confirmed screening for an HR-approved candidate and a specific application; list and review inbound or outbound screening records with status, transcript, answers, and HR summary.
-- `POST /api/screening/webhook` — authenticated Vapi call-status and end-of-call event receiver. Vapi must send the configured `x-vapi-secret` header.
+- `POST /api/screening/{candidate_id}/start`, `POST /api/screening/{screening_id}/session`, `POST /api/screening/{screening_id}/conversation`, `GET /api/screening`, `GET /api/screening/records/{screening_id}` — HR prepares and tests browser screening sessions for approved candidates; list and review transcripts, answers, and summaries.
+- `GET /api/screening/candidate/my`, `POST /api/screening/candidate/{screening_id}/session`, `POST /api/screening/candidate/{screening_id}/conversation` — candidate-owned screening sessions, protected by candidate login.
+- `POST /api/screening/webhook` — public endpoint protected by ElevenLabs HMAC signature verification; receives post-call transcripts and persists consent-gated results.
 - `GET /api/interviews/interviewers`, `GET /api/interviews/available-slots`, `POST /api/interviews/schedule`, `GET /api/interviews`, `PUT /api/interviews/{interview_id}/reschedule`, `PATCH/DELETE /api/interviews/{interview_id}` — find calendar slots, create/reschedule/cancel interviews with HR approval, and view calendar/email status.
 
 Validation errors return HTTP 422, missing records return HTTP 404, duplicates/conflicts or unapproved stage transitions return HTTP 409, and unavailable integrations return HTTP 502. AI results are advisory; the configured low-score rule can automatically mark applications rejected and attempt a consent-gated email. Candidate text is treated as untrusted data; evaluation excludes obvious instruction lines and protected-trait fields and uses only job-related evidence. Screening transcripts are also untrusted input; summaries are restricted to job-related answers and never evaluate voice, accent, emotion, personality, or protected traits. HR and candidate authentication are implemented with password hashing, signed expiring bearer tokens, role-based API guards, candidate-owned application queries, and email verification for the configured HR address.
@@ -200,12 +165,12 @@ npm run dev
 
 Vite prints the local frontend URL when it starts.
 
-The React application provides separate HR and candidate portals. HR pages include Dashboard, Jobs, Candidates, Resume Evaluation, Screening, Interviews, Email Automation, and Settings. Candidates can browse open jobs, apply, upload a CV, and view only their own application statuses. All API requests are centralized in `frontend/src/services/api.js`; set `VITE_API_BASE_URL` in `frontend/.env` to the FastAPI API base URL. Resume upload and evaluation use the existing resume API, while the candidates page uses `GET /api/resumes` to display saved match scores. Settings displays only browser-local profile preferences because the backend does not currently have an authenticated user profile or integration-health endpoint.
+The React application provides separate HR and candidate portals. HR pages include Dashboard, Jobs, Candidates, Screening, Interviews, Email Automation, and Settings. CV scores remain visible with each candidate application in the Candidates page; the separate Evaluate CV navigation page has been removed. HR can remove an individual application from the Candidates review table. Candidates can browse open jobs, apply through the redesigned application form, upload a CV, view only their own application statuses, and complete screening sessions from their portal. For remote candidates, `FRONTEND_BASE_URL` must be a public HTTPS address; localhost links work only on the same computer. All API requests are centralized in `frontend/src/services/api.js`; set `VITE_API_BASE_URL` in `frontend/.env` to the FastAPI API base URL. Resume upload and evaluation use the existing resume API, while the candidates page uses `GET /api/resumes` to display saved match scores. Settings displays only browser-local profile preferences because the backend does not currently have an authenticated user profile or integration-health endpoint.
 
 ## Remaining implementation
 
 - Database migrations for future schema changes; startup currently creates missing tables only.
 - Add automated frontend and browser end-to-end tests for HR and candidate journeys.
 - Add request rate limiting and stronger operational security controls before public deployment.
-- Replace the current Vapi voice integration with ElevenLabs if ElevenLabs is the required provider; the current screening code still calls Vapi.
+- Configure the private ElevenLabs agent, enable System Prompt and First Message overrides, and configure its signed post-call transcription webhook before testing. No phone number is needed.
 - Automated UI tests, operational migrations for remaining legacy schemas, and production deployment configuration.

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Search, UserRound } from "lucide-react";
+import { Search, UserRound, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api } from "../services/api";
 import Panel from "../components/Panel";
@@ -26,6 +26,7 @@ export default function CandidatesPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [savingConsent, setSavingConsent] = useState(false);
+  const [deletingApplicationId, setDeletingApplicationId] = useState("");
 
   async function loadCandidates() {
     setLoading(true);
@@ -72,6 +73,19 @@ export default function CandidatesPage() {
       || candidate.email?.toLowerCase().includes(q)
       || candidateApplications.some((item) => jobById.get(item.job_id)?.title?.toLowerCase().includes(q));
   });
+
+  async function deleteApplication(application) {
+    const candidate = candidates.find((item) => item.id === application.candidate_id);
+    if (!window.confirm(`Remove ${candidate?.full_name || "this candidate"}’s application for ${jobById.get(application.job_id)?.title || "this position"}? This cannot be undone.`)) return;
+    setDeletingApplicationId(application.id); setError(""); setNotice("");
+    try {
+      await api.deleteApplication(application.id);
+      setApplications((rows) => rows.filter((row) => row.id !== application.id));
+      setResumes((rows) => rows.filter((row) => row.application_id !== application.id));
+      setNotice("Application removed successfully.");
+    } catch (requestError) { setError(requestError.message || "Could not remove application."); }
+    finally { setDeletingApplicationId(""); }
+  }
 
   async function changeEmailConsent(event) {
     if (!selected) return;
@@ -144,7 +158,7 @@ export default function CandidatesPage() {
           <EmptyState title="No applications yet">Applications appear here after a candidate submits a CV for a job.</EmptyState>
         ) : (
           <div className="table-scroll"><table className="data-table">
-            <thead><tr><th>Candidate</th><th>Position</th><th>CV score</th><th>Status</th><th>HR action</th></tr></thead>
+            <thead><tr><th>Candidate</th><th>Position</th><th>CV score</th><th>Status</th><th>HR action</th><th>Remove</th></tr></thead>
             <tbody>{applications.map((application) => {
               const candidate = candidates.find((item) => item.id === application.candidate_id);
               const resume = resumeByApplication.get(application.id);
@@ -155,6 +169,7 @@ export default function CandidatesPage() {
                 <td>{resume?.score == null ? "Not evaluated" : <span className="score-pill">{resume.score}/100</span>}</td>
                 <td><StatusBadge>{application.status.replaceAll("_"," ")}</StatusBadge></td>
                 <td>{needsReview ? <Link className="text-link" to="/email-automation">Open HR review</Link> : "—"}</td>
+                <td><button type="button" className="button button-danger button-small" onClick={() => deleteApplication(application)} disabled={deletingApplicationId === application.id}>{deletingApplicationId === application.id ? "Removing…" : <><Trash2 size={14}/> Remove</>}</button></td>
               </tr>;
             })}</tbody>
           </table></div>
