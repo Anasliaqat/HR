@@ -149,11 +149,11 @@ def start_screening(
     candidate = db.get(Candidate, candidate_id)
     if candidate is None:
         raise HTTPException(status_code=404, detail="Candidate not found")
-    if not candidate.hr_approved:
-        raise HTTPException(status_code=409, detail="Candidate must be approved by HR before screening")
     application = db.get(Application, payload.application_id)
     if application is None or application.candidate_id != candidate_id:
         raise HTTPException(status_code=404, detail="Application not found for this candidate")
+    if application.status != "approved_by_hr":
+        raise HTTPException(status_code=409, detail="Application must be approved by HR before screening")
     active = db.scalar(select(Screening).where(
         Screening.application_id == application.id,
         Screening.call_status.in_(_IN_PROGRESS_STATUSES),
@@ -175,10 +175,10 @@ def _browser_session_payload(screening: Screening, db: Session, mode: str) -> di
     candidate = db.get(Candidate, screening.candidate_id)
     application = db.get(Application, screening.application_id) if screening.application_id else None
     job = db.get(Job, application.job_id) if application else None
-    if candidate is None or job is None:
-        raise HTTPException(status_code=404, detail="Screening candidate or job was not found")
-    if not candidate.hr_approved:
-        raise HTTPException(status_code=409, detail="Candidate is not approved for screening")
+    if candidate is None or application is None or job is None:
+        raise HTTPException(status_code=404, detail="Screening candidate, application, or job was not found")
+    if application.status != "approved_by_hr":
+        raise HTTPException(status_code=409, detail="Application is not approved by HR for screening")
     try:
         credential = create_browser_session(mode)
     except (ElevenLabsServiceError, ValueError) as exc:
