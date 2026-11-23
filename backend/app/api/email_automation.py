@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, joinedload
 
-from app.agents.email_automation_agent import classify_score
+from app.agents.email_automation_agent import classify_score, evaluation_signals
 from app.database.connection import get_db
 from app.models.application import Application
 from app.models.email_log import EmailLog
@@ -23,6 +23,7 @@ from app.schemas.email_automation import (
     EmailSendRequest,
 )
 from app.services.email_automation_service import (
+    APPROVED_STATUSES,
     EmailAutomationError,
     EmailSendInProgress,
     build_email_preview,
@@ -90,6 +91,14 @@ def _evaluation_skills(
     )
 
 
+def _record_candidate_approval(application: Application) -> None:
+    """HR clicked Accept: record it on the candidate so screening and interviews unlock."""
+    candidate = application.candidate
+    if candidate is not None and not candidate.hr_approved:
+        candidate.hr_approved = True
+        candidate.hr_approved_at = datetime.now(timezone.utc)
+
+
 @router.get("/applications", response_model=list[EmailApplicationResponse])
 def list_email_applications(
     db: Session = Depends(get_db),
@@ -134,22 +143,12 @@ def list_email_applications(
         score = scores.get(application.id)
         resume = latest_resumes.get(application.id)
         try:
-            (
-                matched_skills,
-                missing_skills,
-                has_relevant_evidence,
-                has_match_evidence,
-            ) = (
-                _evaluation_skills(resume)
-            )
+            matched_skills, missing_skills, _, _ = _evaluation_skills(resume)
             score_action = (
                 classify_score(
                     score,
-                    matched_skills=(
-                        matched_skills if has_match_evidence else None
-                    ),
                     required_skills=application.job.required_skills,
-                    has_relevant_evidence=has_relevant_evidence,
+                    **evaluation_signals(resume.evaluation_details if resume else None),
                 )
                 if score is not None
                 else None
@@ -308,10 +307,10 @@ def preview_application_email(
         "rejected_by_hr",
     }:
         reason = "Record a rejection decision before sending this email."
-    elif email_type == "selection" and application.status != "approved_by_hr":
+    elif email_type == "selection" and application.status not in APPROVED_STATUSES:
         reason = "Record HR approval before sending this email."
     elif email_type == "interview_invitation" and (
-        application.status != "approved_by_hr"
+        application.status not in APPROVED_STATUSES
         or interview is None
         or interview.status != "scheduled"
         or interview.test_mode
@@ -338,42 +337,23 @@ def record_hr_decision(
     db: Session = Depends(get_db),
 ) -> EmailLog:
     application = _get_application(db, application_id)
-    if application.agent_review_reason:
+    if application.status == "over_agent_review":
         raise HTTPException(
             status_code=409,
-            detail=(
-                "Use the Over Agent Review decision action. No candidate email "
-                "will be sent for this application."
-            ),
-        )
-    resume = _latest_evaluation(db, application.id)
-    if resume is None or resume.score is None:
-        raise HTTPException(status_code=409, detail="A completed CV score is required")
-    matched_skills, _, has_relevant_evidence, has_match_evidence = (
-        _evaluation_skills(resume)
-    )
-    try:
-        action = classify_score(
-            resume.score,
-            matched_skills=matched_skills if has_match_evidence else None,
-            required_skills=application.job.required_skills,
-            has_relevant_evidence=has_relevant_evidence,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    if action != "hr_review":
-        raise HTTPException(
-            status_code=409,
-            detail="Only applications scoring above 50 are sent to the HR decision queue.",
+            detail="Use the Over Agent Review decision action for this application.",
         )
     if application.status != "pending_review":
         raise HTTPException(
             status_code=409,
-            detail="This application already has a recorded workflow decision",
+            detail="This application already has a recorded decision.",
         )
+    resume = _latest_evaluation(db, application.id)
+    if resume is None or resume.score is None:
+        raise HTTPException(status_code=409, detail="A completed CV score is required")
 
     if payload.decision == "approve":
         application.status = "approved_by_hr"
+        _record_candidate_approval(application)
         email_type = "selection"
     else:
         application.status = "rejected_by_hr"
@@ -408,6 +388,8 @@ def decide_agent_review(
     application.status = (
         "approved_by_hr" if payload.decision == "approve" else "rejected_by_hr"
     )
+    if payload.decision == "approve":
+        _record_candidate_approval(application)
     db.commit()
     email_type = "selection" if payload.decision == "approve" else "rejection"
     try:

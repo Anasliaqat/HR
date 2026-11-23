@@ -1,11 +1,13 @@
 """Password hashing, signed access tokens, and role dependencies."""
-import base64, hashlib, hmac, json, secrets, smtplib
+import base64, hashlib, hmac, json, logging, os, secrets
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
+from uuid import UUID
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
-from app.config import settings
+from app.config import AUTH_SECRET_FILE, settings
+from app.services.smtp_mailer import SmtpDeliveryError, send_message
 from app.database.connection import get_db
 from app.models.user import User
 from app.models.candidate import Candidate
@@ -29,10 +31,39 @@ def verify_password(password: str, stored: str) -> bool:
     except (ValueError, TypeError):
         return False
 
+logger = logging.getLogger(__name__)
+# The value shipped in older .env.example files. It is public, so never trust it.
+_PLACEHOLDER_SECRETS = {"replace-with-a-random-secret-at-least-32-characters"}
+_local_secret_cache: bytes | None = None
+
+def _local_secret() -> bytes:
+    """A random signing key kept in backend/.auth_secret (gitignored), created on first use."""
+    global _local_secret_cache
+    if _local_secret_cache is not None:
+        return _local_secret_cache
+    try:
+        existing = AUTH_SECRET_FILE.read_text(encoding="utf-8").strip()
+        if len(existing) >= 32:
+            _local_secret_cache = existing.encode()
+            return _local_secret_cache
+    except OSError:
+        pass
+    generated = secrets.token_urlsafe(48)
+    try:
+        descriptor = os.open(AUTH_SECRET_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(generated)
+        logger.warning("AUTH_SECRET_KEY is not set; generated a private signing key in %s.", AUTH_SECRET_FILE.name)
+    except OSError:
+        logger.warning("AUTH_SECRET_KEY is not set and the key file could not be saved; logins will reset on restart.")
+    _local_secret_cache = generated.encode()
+    return _local_secret_cache
+
 def _secret() -> bytes:
-    if len(settings.auth_secret_key) < 32:
-        raise HTTPException(status_code=503, detail="AUTH_SECRET_KEY must contain at least 32 characters")
-    return settings.auth_secret_key.encode()
+    configured = settings.auth_secret_key.strip()
+    if len(configured) >= 32 and configured not in _PLACEHOLDER_SECRETS:
+        return configured.encode()
+    return _local_secret()
 
 def create_access_token(subject: str, role: str) -> str:
     header = base64.urlsafe_b64encode(json.dumps({"alg":"HS256","typ":"JWT"}).encode()).rstrip(b"=")
@@ -44,6 +75,7 @@ def create_access_token(subject: str, role: str) -> str:
 def decode_access_token(token: str) -> dict:
     try:
         header, payload, signature = token.split(".")
+        if json.loads(base64.urlsafe_b64decode(header+"="*((4-len(header)%4)%4))).get("alg") != "HS256": raise ValueError()
         signing = (header+"."+payload).encode()
         expected = base64.urlsafe_b64encode(hmac.new(_secret(), signing, hashlib.sha256).digest()).rstrip(b"=").decode()
         if not hmac.compare_digest(signature, expected): raise ValueError()
@@ -58,7 +90,11 @@ def get_principal(credentials: HTTPAuthorizationCredentials | None = Depends(bea
     if credentials is None: raise HTTPException(status_code=401, detail="Login required")
     data = decode_access_token(credentials.credentials)
     model = User if data["role"] == "hr" else Candidate
-    account = db.get(model, data["sub"])
+    try:
+        account_id = UUID(str(data["sub"]))
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token") from None
+    account = db.get(model, account_id)
     if account is None or (data["role"] == "hr" and (not account.is_active or not account.is_verified)):
         raise HTTPException(status_code=401, detail="Account is inactive")
     return {"id": str(account.id), "role": data["role"], "email": account.email}
@@ -72,17 +108,20 @@ def require_candidate(principal: dict = Depends(get_principal)) -> dict:
     return principal
 
 def send_verification_code(email: str, code: str) -> None:
-    if not all((settings.smtp_host, settings.smtp_user, settings.smtp_password, settings.smtp_from_email)):
-        raise HTTPException(status_code=503, detail="Email verification is not configured. Set SMTP settings before HR signup.")
     message = EmailMessage()
     message["Subject"] = "Your HR portal verification code"
-    message["From"] = settings.smtp_from_email
+    message["From"] = settings.smtp_from_email or settings.smtp_user
     message["To"] = email
     message.set_content(f"Your HR portal verification code is {code}. It expires in 10 minutes.")
     try:
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
-            server.starttls()
-            server.login(settings.smtp_user, settings.smtp_password)
-            server.send_message(message)
-    except Exception:
-        raise HTTPException(status_code=502, detail="Could not send verification email. Check SMTP configuration.") from None
+        send_message(message)
+    except SmtpDeliveryError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not send the verification email. {exc}") from None
+
+
+# A real scrypt hash of a random value, so a login for an unknown email costs the
+# same time as one for a real account and cannot be used to discover who is registered.
+_DUMMY_HASH = hash_password(secrets.token_urlsafe(16))
+
+def burn_password_check(password: str) -> None:
+    verify_password(password, _DUMMY_HASH)

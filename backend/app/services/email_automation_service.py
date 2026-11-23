@@ -2,8 +2,6 @@
 
 import hashlib
 import logging
-import smtplib
-import ssl
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.message import EmailMessage
@@ -17,8 +15,10 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.application import Application
+from app.models.candidate import Candidate
 from app.models.email_log import EmailLog
 from app.models.interview import Interview
+from app.services.smtp_mailer import SmtpDeliveryError, send_message
 
 logger = logging.getLogger(__name__)
 EmailType = Literal[
@@ -27,6 +27,9 @@ EmailType = Literal[
     "interview_invitation",
 ]
 CONSENT_REQUIRED = "Candidate email consent has not been recorded."
+# Score-based approval (CV score at or above the auto-approve threshold) and an
+# HR click both allow the approval email and the interview invitation.
+APPROVED_STATUSES = {"approved_by_hr", "interview_eligible"}
 
 
 class EmailAutomationError(RuntimeError):
@@ -127,54 +130,19 @@ def _idempotency_key(
 
 
 def _deliver(preview: EmailPreview, idempotency_key: str) -> str:
-    """Send one message through an authenticated SMTP account (Gmail supported)."""
-    if not settings.smtp_host or not settings.smtp_user or not settings.smtp_password:
-        raise EmailAutomationError(
-            "Configure SMTP_HOST, SMTP_USER, and SMTP_PASSWORD. For Gmail, use a Google App Password."
-        )
-
-    from_address = settings.smtp_from_email or settings.smtp_user
+    """Send one message through the authenticated SMTP account (Gmail supported)."""
     message = EmailMessage()
-    message["From"] = from_address
+    message["From"] = settings.smtp_from_email or settings.smtp_user
     message["To"] = preview.recipient_email
     message["Subject"] = preview.subject
     message["Message-ID"] = (
         f"<{hashlib.sha256(idempotency_key.encode()).hexdigest()}@zetech.local>"
     )
     message.set_content(preview.body)
-
     try:
-        if settings.smtp_port == 465:
-            with smtplib.SMTP_SSL(
-                settings.smtp_host,
-                settings.smtp_port,
-                timeout=20,
-                context=ssl.create_default_context(),
-            ) as client:
-                client.login(settings.smtp_user, settings.smtp_password)
-                client.send_message(message)
-        else:
-            with smtplib.SMTP(
-                settings.smtp_host,
-                settings.smtp_port,
-                timeout=20,
-            ) as client:
-                client.ehlo()
-                client.starttls(context=ssl.create_default_context())
-                client.ehlo()
-                client.login(settings.smtp_user, settings.smtp_password)
-                client.send_message(message)
-    except smtplib.SMTPAuthenticationError as exc:
-        logger.warning("SMTP recruiting email authentication failed.")
-        raise EmailAutomationError(
-            "Gmail SMTP authentication failed. Check SMTP_USER and use a Google App Password in SMTP_PASSWORD."
-        ) from exc
-    except (OSError, smtplib.SMTPException) as exc:
-        logger.warning("SMTP recruiting email delivery failed.")
-        raise EmailAutomationError(
-            "SMTP could not deliver the recruiting email. Check the SMTP host, port, and account settings."
-        ) from exc
-
+        send_message(message)
+    except SmtpDeliveryError as exc:
+        raise EmailAutomationError(str(exc)) from exc
     return message["Message-ID"]
 
 
@@ -193,9 +161,9 @@ def send_application_email(
             "Candidate emails are disabled until HR decides an Over Agent Review application."
         )
     if email_type == "interview_invitation":
-        if application.status != "approved_by_hr":
+        if application.status not in APPROVED_STATUSES:
             raise EmailAutomationError(
-                "An interview invitation requires recorded HR approval."
+                "An interview invitation requires an approved application."
             )
         if (
             interview is None
@@ -215,9 +183,9 @@ def send_application_email(
         raise EmailAutomationError(
             "A rejection email requires a recorded rejection decision."
         )
-    elif email_type == "selection" and application.status != "approved_by_hr":
+    elif email_type == "selection" and application.status not in APPROVED_STATUSES:
         raise EmailAutomationError(
-            "A selection email requires a recorded HR approval."
+            "An approval email requires HR approval or an automatic score approval."
         )
 
     preview = build_email_preview(application, email_type, interview)
@@ -290,6 +258,44 @@ def send_application_email(
     db.commit()
     db.refresh(email_log)
     return email_log
+
+
+def send_consent_pending_emails(db: Session, candidate: Candidate) -> list[EmailLog]:
+    """Deliver emails that were held back until this candidate's consent was recorded."""
+    if not candidate.email_consent:
+        return []
+    held = db.scalars(
+        select(EmailLog)
+        .join(Application, EmailLog.application_id == Application.id)
+        .where(
+            Application.candidate_id == candidate.id,
+            EmailLog.status == "pending",
+            EmailLog.error_message == CONSENT_REQUIRED,
+            EmailLog.deleted_at.is_(None),
+            EmailLog.email_type.in_(("rejection", "selection", "interview_invitation")),
+        )
+        .order_by(EmailLog.created_at)
+    ).all()
+    delivered: list[EmailLog] = []
+    for held_log in held:
+        application = db.get(Application, held_log.application_id)
+        interview = (
+            db.get(Interview, held_log.interview_id)
+            if held_log.interview_id is not None
+            else None
+        )
+        try:
+            delivered.append(
+                send_application_email(db, application, held_log.email_type, interview)
+            )
+        except EmailAutomationError:
+            logger.warning(
+                "Held %s email %s could not be sent after consent was recorded.",
+                held_log.email_type,
+                held_log.id,
+                exc_info=True,
+            )
+    return delivered
 
 
 def get_email_log(db: Session, email_log_id: UUID) -> EmailLog | None:

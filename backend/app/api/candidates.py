@@ -16,6 +16,7 @@ from app.schemas.candidates import (
     CandidateEmailConsentUpdate,
     CandidateResponse,
 )
+from app.services.email_automation_service import send_consent_pending_emails
 from app.services.phone_service import normalize_phone_number
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
@@ -125,6 +126,9 @@ def update_candidate_email_consent(
         datetime.now(timezone.utc) if payload.email_consent else None
     )
     db.commit()
+    if payload.email_consent:
+        # Send any rejection/approval emails that were waiting for consent.
+        send_consent_pending_emails(db, candidate)
     db.refresh(candidate)
     return candidate
 

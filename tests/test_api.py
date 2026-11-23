@@ -69,7 +69,7 @@ def client(
 
 def test_home_health_docs_and_cors(client: TestClient) -> None:
     assert client.get("/").status_code == 200
-    assert client.get("/health").json() == {"status": "ok"}
+    assert client.get("/health").json() == {"status": "ok", "database": "connected"}
     assert client.get("/docs").status_code == 200
     paths = client.get("/openapi.json").json()["paths"]
     expected_operations = {
@@ -835,7 +835,11 @@ def test_interview_scheduling_and_conflict_detection(
     ).json()
     candidate = client.post(
         "/api/candidates",
-        json={"full_name": "Interview Candidate", "email": "interview@example.com"},
+        json={
+            "full_name": "Interview Candidate",
+            "email": "interview@example.com",
+            "email_consent": True,
+        },
     ).json()
 
     available_slots = client.get("/api/interviews/available-slots")

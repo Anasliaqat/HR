@@ -35,6 +35,8 @@ from app.services.voice_service import VapiServiceError, create_outbound_call
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/screening", tags=["screening"])
+# Provider webhooks cannot send an HR login token; they are authenticated by a shared secret instead.
+public_router = APIRouter(prefix="/screening", tags=["screening webhooks"])
 
 _IN_PROGRESS_STATUSES = {"queued", "ringing", "in_progress"}
 _VAPI_STATUS_MAP = {
@@ -356,7 +358,7 @@ def get_screening_record(
     return _dashboard_response(screening)
 
 
-@router.post("/webhook", response_model=None)
+@public_router.post("/webhook", response_model=None)
 def vapi_webhook(
     payload: dict[str, Any],
     db: Session = Depends(get_db),

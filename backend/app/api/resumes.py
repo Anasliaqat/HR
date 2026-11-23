@@ -34,6 +34,7 @@ from app.schemas.resumes import (
     ResumeResponse,
 )
 from app.services.resume_parser import extract_profile, extract_text
+from app.services.upload_security import UnsafeUploadError, validate_resume_content
 
 router = APIRouter(prefix="/resumes", tags=["resumes"])
 logger = logging.getLogger(__name__)
@@ -109,6 +110,13 @@ async def upload_resume(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Uploaded resume is empty",
         )
+    try:
+        validate_resume_content(bytes(content), extension)
+    except UnsafeUploadError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=str(exc),
+        ) from None
 
     resume_id = uuid4()
     stored_name = f"{resume_id}{extension}"
@@ -220,6 +228,9 @@ def _score_and_store_resume(
     )
     details["job_id"] = str(job.id)
     details["job_title"] = job.title
+    # No recognizable CV sections: the score reflects a parsing gap, not an
+    # irrelevant candidate, so the email agent must hand this one to HR.
+    details["profile_unparsed"] = not any(profile.model_dump().values())
     resume.score = result.score
     resume.extracted_text = extracted_text
     resume.extracted_skills = profile.skills

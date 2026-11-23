@@ -24,6 +24,7 @@ def test_init_db_retries_transient_operational_errors(
         connection, "migrate_email_automation_columns", lambda engine: None
     )
     monkeypatch.setattr(connection, "migrate_screening_columns", lambda engine: None)
+    monkeypatch.setattr(connection, "migrate_auth_columns", lambda engine: None)
     monkeypatch.setattr(connection.time, "sleep", delays.append)
 
     connection.init_db()

@@ -33,3 +33,11 @@ pnpm-debug.log*
 .idea/
 .DS_Store
 Thumbs.db
+
+# Generated login signing key
+backend/.auth_secret
+
+# Local databases hold candidate data; never commit them
+*.db
+*.sqlite
+*.sqlite3

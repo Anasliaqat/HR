@@ -22,6 +22,7 @@ from app.models.interview import Interview
 from app.models.resume_evaluation import ResumeEvaluation
 from app.services import email_automation_service
 from app.services import email_service
+from app.services import smtp_mailer
 from app.services.email_automation_service import (
     build_email_preview,
     send_application_email,
@@ -91,11 +92,12 @@ def create_application(
         (51, "hr_review"),
         (60, "hr_review"),
         (70, "hr_review"),
-        (90, "hr_review"),
-        (100, "hr_review"),
+        (89, "hr_review"),
+        (90, "automatic_approval"),
+        (100, "automatic_approval"),
     ],
 )
-def test_score_boundaries_follow_configured_conservative_defaults(
+def test_score_boundaries_follow_the_configured_policy(
     score: int,
     expected: str,
 ) -> None:
@@ -338,7 +340,7 @@ def test_gmail_smtp_uses_starttls_login_and_configured_sender(
     monkeypatch.setattr(settings, "smtp_user", "hr@example.com")
     monkeypatch.setattr(settings, "smtp_password", "test-app-password")
     monkeypatch.setattr(settings, "smtp_from_email", "hr@example.com")
-    monkeypatch.setattr(email_automation_service.smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(smtp_mailer.smtplib, "SMTP", FakeSMTP)
 
     message_id = email_automation_service._deliver(preview, "test-key")
 
@@ -427,7 +429,7 @@ def test_real_delivery_configuration_failure_is_persisted_for_retry(
 
     assert email_log.status == "failed"
     assert email_log.sent_at is None
-    assert "Configure SMTP_HOST" in (email_log.error_message or "")
+    assert "Email is not configured" in (email_log.error_message or "")
 
 
 @pytest.fixture
@@ -503,7 +505,7 @@ def test_hr_decision_and_history_api_preserve_consent_gate(
 
     dashboard = api_client.get("/api/email-automation/applications")
     assert dashboard.status_code == 200
-    assert dashboard.json()[0]["score_action"] == "hr_decision"
+    assert dashboard.json()[0]["score_action"] == "hr_review"
     assert dashboard.json()[0]["email_consent"] is False
     preview = api_client.get(
         f"/api/email-automation/applications/{application_id}/preview",
@@ -545,7 +547,7 @@ def test_hr_decision_and_history_api_preserve_consent_gate(
     )
     assert retry.status_code == 200
     assert retry.json()["status"] == "failed"
-    assert "Configure SMTP_HOST" in retry.json()["error_message"]
+    assert "Email is not configured" in retry.json()["error_message"]
     assert retry.json()["sent_at"] is None
 
     delete_history = api_client.delete(
@@ -607,5 +609,165 @@ def test_low_score_is_automatically_rejected_and_email_attempt_is_logged(
     assert len(history) == 1
     assert history[0]["email_type"] == "rejection"
     assert history[0]["status"] == "failed"
-    assert "Configure SMTP_HOST" in history[0]["error_message"]
+    assert "Email is not configured" in history[0]["error_message"]
     assert api_client.get(f"/api/applications/{application_id}").json()["status"] == "rejected"
+
+
+
+def stub_delivery(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record who would be emailed instead of using real SMTP."""
+    sent_to: list[str] = []
+
+    def fake_deliver(preview, idempotency_key):
+        sent_to.append(f"{preview.email_type}:{preview.recipient_email}")
+        return f"message-{len(sent_to)}"
+
+    monkeypatch.setattr(email_automation_service, "_deliver", fake_deliver)
+    return sent_to
+
+
+def test_score_of_90_or_more_sends_the_approval_email_without_marking_hr_approval(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent_to = stub_delivery(monkeypatch)
+    application, resume = create_application(db_session, score=93, email_consent=True)
+
+    apply_resume_score_outcome(db_session, resume)
+
+    db_session.refresh(application)
+    assert application.status == "interview_eligible"
+    assert application.status != "approved_by_hr"
+    assert application.candidate.hr_approved is False
+    assert db_session.scalar(select(EmailLog)).email_type == "selection"
+    assert sent_to == ["selection:taylor@example.com"]
+
+
+def test_high_score_without_supporting_skills_goes_to_hr_not_auto_approval(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent_to = stub_delivery(monkeypatch)
+    application, resume = create_application(
+        db_session, score=95, email_consent=True, matched_skills=[]
+    )
+
+    apply_resume_score_outcome(db_session, resume)
+
+    db_session.refresh(application)
+    assert application.status == "pending_review"
+    assert sent_to == []
+
+
+def test_irrelevant_cv_with_a_low_score_is_rejected_and_emailed(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent_to = stub_delivery(monkeypatch)
+    application, resume = create_application(
+        db_session, score=12, email_consent=True, matched_skills=[]
+    )
+    resume.evaluation_details = {
+        "matched_skills": [],
+        "evidence": [],
+        "candidate_strengths": [],
+        "relevant_experience": [],
+        "relevant_projects": [],
+        "profile_unparsed": False,
+    }
+
+    apply_resume_score_outcome(db_session, resume)
+
+    db_session.refresh(application)
+    assert application.status == "rejected"
+    assert "No required job skills were matched" in application.agent_review_reason
+    assert sent_to == ["rejection:taylor@example.com"]
+
+
+def test_cv_the_parser_could_not_read_goes_to_hr_instead_of_a_rejection(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent_to = stub_delivery(monkeypatch)
+    application, resume = create_application(
+        db_session, score=0, email_consent=True, matched_skills=[]
+    )
+    resume.evaluation_details = {"matched_skills": [], "profile_unparsed": True}
+
+    apply_resume_score_outcome(db_session, resume)
+
+    db_session.refresh(application)
+    assert application.status == "pending_review"
+    assert "No CV sections could be recognized" in application.agent_review_reason
+    assert sent_to == []
+
+
+def test_rejection_waits_for_consent_and_is_sent_once_consent_is_recorded(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent_to = stub_delivery(monkeypatch)
+    application, resume = create_application(db_session, score=20)
+
+    apply_resume_score_outcome(db_session, resume)
+
+    held = db_session.scalar(select(EmailLog))
+    assert held.status == "pending"
+    assert held.error_message == email_automation_service.CONSENT_REQUIRED
+    assert sent_to == []
+
+    application.candidate.email_consent = True
+    db_session.commit()
+    delivered = email_automation_service.send_consent_pending_emails(
+        db_session, application.candidate
+    )
+
+    assert [log.status for log in delivered] == ["sent"]
+    assert sent_to == ["rejection:taylor@example.com"]
+    assert email_automation_service.send_consent_pending_emails(
+        db_session, application.candidate
+    ) == []
+
+
+def test_hr_accept_sends_the_approval_email_and_records_hr_approval(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent_to = stub_delivery(monkeypatch)
+    candidate_id = api_client.post(
+        "/api/candidates",
+        json={"full_name": "Taylor Candidate", "email": "taylor@example.com", "email_consent": True},
+    ).json()["id"]
+    job_id = api_client.post(
+        "/api/jobs",
+        json={"title": "Backend Engineer", "description": "Build APIs.", "status": "open"},
+    ).json()["id"]
+    application_id = api_client.post(
+        "/api/applications", json={"candidate_id": candidate_id, "job_id": job_id}
+    ).json()["id"]
+    factory = sessionmaker(bind=connection.get_engine(), expire_on_commit=False)
+    with factory() as db:
+        db.add(ResumeEvaluation(
+            candidate_id=UUID(candidate_id), application_id=UUID(application_id),
+            job_id=UUID(job_id), file_name="cv.pdf", file_path="cv.pdf", score=72,
+            evaluation_details={"matched_skills": ["Python"]}, evaluation_status="completed",
+        ))
+        db.commit()
+
+    assert api_client.get(f"/api/candidates/{candidate_id}").json()["hr_approved"] is False
+    decision = api_client.post(
+        f"/api/email-automation/applications/{application_id}/decision",
+        json={"decision": "approve"},
+    )
+
+    assert decision.status_code == 200
+    assert decision.json()["email_type"] == "selection"
+    assert decision.json()["status"] == "sent"
+    assert sent_to == ["selection:taylor@example.com"]
+    assert api_client.get(f"/api/applications/{application_id}").json()["status"] == "approved_by_hr"
+    assert api_client.get(f"/api/candidates/{candidate_id}").json()["hr_approved"] is True
+    # A second click cannot send a second email.
+    assert api_client.post(
+        f"/api/email-automation/applications/{application_id}/decision",
+        json={"decision": "reject"},
+    ).status_code == 409
