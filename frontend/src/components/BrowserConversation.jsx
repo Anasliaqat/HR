@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useConversation } from "@elevenlabs/react";
 import { api } from "../services/api";
 
@@ -7,11 +7,9 @@ export default function BrowserConversation({ screeningId, candidate = false, se
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const attachedConversationRef = useRef("");
-  const returnedConversationIdRef = useRef("");
 
   const conversation = useConversation({
-    overrides: session.overrides,
+    overrides: session?.overrides,
     onMessage: (message) => {
       const text = typeof message === "string"
         ? message
@@ -24,82 +22,52 @@ export default function BrowserConversation({ screeningId, candidate = false, se
       }
     },
     onError: (reason) => {
-      setBusy(false);
-      setError(reason?.message || (typeof reason === "string" ? reason : "ElevenLabs could not connect. Check the agent, token, and microphone permissions."));
+      setError(reason?.message || (typeof reason === "string" ? reason : "ElevenLabs connection failed. Check the agent configuration and try again."));
     },
   });
-
-  // Current versions of the React SDK expose the conversation ID through
-  // getId() after connection. Older versions returned it from startSession().
-  // Attach only after the WebRTC connection is established so the backend
-  // never receives an undefined conversation ID.
-  useEffect(() => {
-    if (conversation.status !== "connected" || attachedConversationRef.current) return;
-
-    const conversationId = conversation.getId?.() || returnedConversationIdRef.current;
-    if (!conversationId) {
-      setError("ElevenLabs connected, but did not provide a conversation ID. Please try again.");
-      setBusy(false);
-      conversation.endSession().catch(() => {});
-      return;
-    }
-
-    attachedConversationRef.current = conversationId;
-    api.attachBrowserConversation(screeningId, conversationId, candidate)
-      .then(() => setError(""))
-      .catch(async (reason) => {
-        attachedConversationRef.current = "";
-        setError(reason?.message || "The screening connected, but the application could not save the session. Please try again.");
-        try {
-          await conversation.endSession();
-        } catch {
-          // Keep the original API error visible.
-        }
-      })
-      .finally(() => setBusy(false));
-  }, [conversation.status, screeningId, candidate]);
 
   async function start() {
     setBusy(true);
     setError("");
     setMessages([]);
-    attachedConversationRef.current = "";
-    returnedConversationIdRef.current = "";
 
     try {
-      if (!session?.token) {
-        throw new Error("The screening token is missing. Refresh the candidate portal and try again.");
+      if (!session?.token || !session?.agent_id) {
+        throw new Error("The ElevenLabs session details are incomplete. Refresh the portal and try again.");
       }
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error("Microphone access is unavailable. Open this page on localhost or HTTPS.");
       }
 
+      // Ask for permission from the button click, before opening the agent.
       const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       permissionStream.getTracks().forEach((track) => track.stop());
 
-      const result = conversation.startSession({
-        connectionType: "webrtc",
+      // startSession resolves with the actual ElevenLabs conversation ID.
+      // Wait for it before attaching the conversation to the candidate's record.
+      const conversationId = await conversation.startSession({
+        agentId: session.agent_id,
         conversationToken: session.token,
+        connectionType: "webrtc",
         userId: screeningId,
         dynamicVariables: session.dynamic_variables,
         overrides: session.overrides,
       });
 
-      // Backward compatibility with SDK versions that return the ID from
-      // startSession(); newer React SDK versions return void and use getId().
-      if (result && typeof result.then === "function") {
-        result.then((id) => {
-          if (typeof id === "string") returnedConversationIdRef.current = id;
-        }).catch((reason) => {
-          setBusy(false);
-          setError(reason?.message || "ElevenLabs could not start the screening.");
-        });
-      } else if (typeof result === "string") {
-        returnedConversationIdRef.current = result;
+      if (typeof conversationId !== "string" || !conversationId.startsWith("conv_")) {
+        throw new Error("ElevenLabs connected without returning a valid conversation ID. Please try again.");
+      }
+
+      try {
+        await api.attachBrowserConversation(screeningId, conversationId, candidate);
+      } catch (attachError) {
+        await conversation.endSession();
+        throw attachError;
       }
     } catch (reason) {
-      setBusy(false);
       setError(reason?.message || "Could not start the ElevenLabs screening. Check microphone permission and agent configuration.");
+    } finally {
+      setBusy(false);
     }
   }
 
