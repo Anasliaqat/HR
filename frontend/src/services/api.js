@@ -92,6 +92,8 @@ export const api = {
     client
       .post(`/screening/${candidateId}/start`, payload)
       .then(({ data }) => data),
+  sendScreeningInvitation: (screeningId) =>
+    client.post(`/screening/${screeningId}/invite`).then(({ data }) => data),
   getInterviews: () => client.get("/interviews").then(({ data }) => data),
   getInterviewers: () =>
     client.get("/interviews/interviewers").then(({ data }) => data),
