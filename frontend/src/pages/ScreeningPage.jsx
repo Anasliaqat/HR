@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { RefreshCw, ShieldCheck } from "lucide-react";
-import BrowserConversation from "../components/BrowserConversation";
 import { api } from "../services/api";
 import Panel from "../components/Panel";
 import {
@@ -28,7 +27,6 @@ export default function ScreeningPage() {
   const [screenings, setScreenings] = useState([]);
   const [applicationId, setApplicationId] = useState("");
   const [screeningId, setScreeningId] = useState("");
-  const [session, setSession] = useState(null);
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
@@ -150,11 +148,15 @@ export default function ScreeningPage() {
       const result = await api.startScreening(selectedCandidate.id, {
         application_id: selectedApplication.id,
       });
-      const browserSession = await api.createBrowserSession(result.id, "voice");
-      setSession(browserSession);
       setReport(result);
       setScreeningId(result.id);
-      setNotice("Browser screening session prepared. The candidate can also start it from their portal.");
+      const invitation = await api.sendScreeningInvitation(result.id);
+      setNotice(
+        invitation.status === "sent"
+          ? "Screening created and invitation email sent. The candidate can open the email link, sign in, and start the browser-based AI conversation."
+          : invitation.error_message || "Screening created. Email was not sent because candidate email consent is not recorded or SMTP is not configured. The candidate can still see the invitation in their portal."
+      );
+      await loadData();
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -210,7 +212,6 @@ export default function ScreeningPage() {
                 setApplicationId(event.target.value);
                 setReport(null);
                 setScreeningId("");
-                setSession(null);
               }}
             >
               <option value="">Select an approved application</option>
@@ -247,7 +248,6 @@ export default function ScreeningPage() {
             <p className="form-note">
               No phone number is required. The candidate starts the session from their portal and confirms consent with the assistant.
             </p>
-            {session && report?.id && <BrowserConversation screeningId={report.id} session={session} onFinished={refreshReport} />}
           </Panel>
 
           <Panel
@@ -358,7 +358,6 @@ export default function ScreeningPage() {
                   <tr>
                     <th>Candidate</th>
                     <th>Job title</th>
-                    <th>Candidate</th>
                     <th>Call status</th>
                     <th>Call date and time</th>
                     <th>Screening summary</th>
@@ -370,7 +369,6 @@ export default function ScreeningPage() {
                     <tr key={screening.id}>
                       <td>{screening.candidate_name}</td>
                       <td>{screening.job_title ?? "—"}</td>
-                      <td>{screening.candidate_name}</td>
                       <td><StatusBadge>{statusLabels[screening.status] ?? screening.status}</StatusBadge></td>
                       <td>
                         {new Date(

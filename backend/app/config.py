@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_v1_prefix: str = "/api"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    frontend_public_url: str = "http://localhost:5173"
     database_url: str = "sqlite:///./hr_hiring_local.db"
     auth_secret_key: str = ""
     hr_allowed_email: str = "anasarman997@gmail.com"

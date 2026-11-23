@@ -26,6 +26,7 @@ export default function CandidatesPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [savingConsent, setSavingConsent] = useState(false);
+  const [deletingCandidate, setDeletingCandidate] = useState(false);
 
   async function loadCandidates() {
     setLoading(true);
@@ -72,6 +73,27 @@ export default function CandidatesPage() {
       || candidate.email?.toLowerCase().includes(q)
       || candidateApplications.some((item) => jobById.get(item.job_id)?.title?.toLowerCase().includes(q));
   });
+
+  async function removeCandidate() {
+    if (!selected || !window.confirm(`Delete ${selected.full_name}'s candidate profile and related records? This cannot be undone.`)) return;
+    setDeletingCandidate(true);
+    setError("");
+    try {
+      const candidateResumes = resumes.filter((resume) => resume.candidate_id === selected.id);
+      for (const resume of candidateResumes) {
+        await api.deleteResume(resume.id);
+      }
+      await api.deleteCandidate(selected.id);
+      setResumes((rows) => rows.filter((resume) => resume.candidate_id !== selected.id));
+      setSelected(null);
+      setNotice("Candidate profile deleted.");
+      await loadCandidates();
+    } catch (requestError) {
+      setError(requestError.message || "Candidate could not be deleted. Check whether related CV records must be removed first.");
+    } finally {
+      setDeletingCandidate(false);
+    }
+  }
 
   async function changeEmailConsent(event) {
     if (!selected) return;
@@ -184,6 +206,12 @@ export default function CandidatesPage() {
             {applications.filter((item) => item.candidate_id === selected.id).map((item) => (
               <p key={item.id}>{jobById.get(item.job_id)?.title ?? "Job"} · {item.status.replaceAll("_"," ")} · {formatDate(item.applied_at)}</p>
             ))}
+            <div className="candidate-delete-row">
+              <button type="button" className="button button-danger button-small" onClick={removeCandidate} disabled={deletingCandidate}>
+                {deletingCandidate ? "Deleting…" : "Delete candidate"}
+              </button>
+              <small>This removes the candidate and linked applications. Uploaded CV records may need to be deleted first.</small>
+            </div>
             <p className="muted-copy">Manage HR decisions and retry emails in <Link to="/email-automation">Email Automation</Link>.</p>
           </section>
         </div>

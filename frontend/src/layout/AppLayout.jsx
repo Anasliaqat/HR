@@ -4,7 +4,6 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronDown,
-  FileSearch,
   LayoutDashboard,
   Mail,
   Menu,
@@ -21,7 +20,6 @@ import { api } from "../services/api";
 
 const navigation = [
   { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
-  { label: "Evaluate CV", to: "/resumes", icon: FileSearch },
   { label: "Jobs", to: "/jobs", icon: BriefcaseBusiness },
   { label: "Candidates", to: "/candidates", icon: UsersRound },
   { label: "Screening", to: "/screening", icon: Voicemail },
@@ -30,11 +28,10 @@ const navigation = [
 ];
 
 const pageNames = {
-  "/": "Evaluate CV",
+  "/": "Dashboard",
   "/dashboard": "Dashboard",
   "/jobs": "Jobs",
   "/candidates": "Candidates",
-  "/resumes": "Resume evaluation",
   "/screening": "Screening",
   "/interviews": "Interviews",
   "/email-automation": "Email automation",

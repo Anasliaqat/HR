@@ -5,7 +5,6 @@ import DashboardPage from "./pages/DashboardPage";
 import InterviewsPage from "./pages/InterviewsPage";
 import EmailAutomationPage from "./pages/EmailAutomationPage";
 import JobsPage from "./pages/JobsPage";
-import ResumeEvaluationPage from "./pages/ResumeEvaluationPage";
 import ScreeningPage from "./pages/ScreeningPage";
 import SettingsPage from "./pages/SettingsPage";
 import AuthPage from "./pages/AuthPage";
@@ -32,7 +31,7 @@ export default function App() {
      <Route path="dashboard" element={<DashboardPage/>}/>
      <Route path="jobs" element={<JobsPage/>}/>
      <Route path="candidates" element={<CandidatesPage/>}/>
-     <Route path="resumes" element={<ResumeEvaluationPage/>}/>
+     <Route path="resumes" element={<Navigate to="/dashboard" replace/>}/>
      <Route path="screening" element={<ScreeningPage/>}/>
      <Route path="interviews" element={<InterviewsPage/>}/>
      <Route path="email-automation" element={<EmailAutomationPage/>}/>

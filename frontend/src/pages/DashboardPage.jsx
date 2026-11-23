@@ -203,14 +203,9 @@ export default function DashboardPage() {
         title={getGreeting()}
         description="Here’s what’s happening across your hiring pipeline."
         actions={
-          <>
-            <Link className="button button-secondary" to="/">
-              <FileSearch size={16} /> Evaluate a CV
-            </Link>
-            <Link className="button button-primary" to="/jobs">
-              <BriefcaseBusiness size={16} /> Create a job
-            </Link>
-          </>
+          <Link className="button button-primary" to="/jobs">
+            <BriefcaseBusiness size={16} /> Create a job
+          </Link>
         }
       />
       <ErrorMessage>{error}</ErrorMessage>
