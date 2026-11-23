@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { RefreshCw, ShieldCheck } from "lucide-react";
-import BrowserConversation from "../components/BrowserConversation";
 import { api } from "../services/api";
 import Panel from "../components/Panel";
 import {
@@ -28,7 +27,6 @@ export default function ScreeningPage() {
   const [screenings, setScreenings] = useState([]);
   const [applicationId, setApplicationId] = useState("");
   const [screeningId, setScreeningId] = useState("");
-  const [session, setSession] = useState(null);
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
@@ -150,11 +148,9 @@ export default function ScreeningPage() {
       const result = await api.startScreening(selectedCandidate.id, {
         application_id: selectedApplication.id,
       });
-      const browserSession = await api.createBrowserSession(result.id, "voice");
-      setSession(browserSession);
       setReport(result);
       setScreeningId(result.id);
-      setNotice("Browser screening session prepared. The candidate can also start it from their portal.");
+      setNotice("Screening invitation created. The candidate can sign in to the Candidate Portal and start the browser-based AI conversation. No phone number or HR-side call is required.");
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -210,7 +206,6 @@ export default function ScreeningPage() {
                 setApplicationId(event.target.value);
                 setReport(null);
                 setScreeningId("");
-                setSession(null);
               }}
             >
               <option value="">Select an approved application</option>
@@ -247,7 +242,6 @@ export default function ScreeningPage() {
             <p className="form-note">
               No phone number is required. The candidate starts the session from their portal and confirms consent with the assistant.
             </p>
-            {session && report?.id && <BrowserConversation screeningId={report.id} session={session} onFinished={refreshReport} />}
           </Panel>
 
           <Panel
