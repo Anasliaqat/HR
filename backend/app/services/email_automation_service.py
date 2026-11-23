@@ -19,12 +19,14 @@ from app.config import settings
 from app.models.application import Application
 from app.models.email_log import EmailLog
 from app.models.interview import Interview
+from app.models.screening import Screening
 
 logger = logging.getLogger(__name__)
 EmailType = Literal[
     "rejection",
     "selection",
     "interview_invitation",
+    "screening_invitation",
 ]
 CONSENT_REQUIRED = "Candidate email consent has not been recorded."
 
@@ -299,3 +301,72 @@ def get_email_log(db: Session, email_log_id: UUID) -> EmailLog | None:
     return db.scalar(
         select(EmailLog).where(EmailLog.id == email_log_id)
     )
+
+
+def send_screening_invitation(db: Session, screening: Screening) -> EmailLog:
+    """Send a consent-gated email that links the candidate to their browser screening."""
+    application = screening.application
+    candidate = screening.candidate
+    if application is None or candidate is None:
+        raise EmailAutomationError("Screening is not linked to a candidate application.")
+    if not candidate.hr_approved:
+        raise EmailAutomationError("HR approval is required before inviting a candidate to screening.")
+
+    key = f"screening-{screening.id}-invitation"
+    email_log = db.scalar(select(EmailLog).where(EmailLog.idempotency_key == key))
+    if email_log is not None and email_log.status == "sent":
+        return email_log
+    portal_url = f"{settings.frontend_public_url.rstrip('/')}/login?screening={screening.id}"
+    preview = EmailPreview(
+        email_type="screening_invitation",
+        recipient_email=candidate.email,
+        subject=f"Your ZETECH AI screening invitation – {application.job.title}",
+        body=(
+            f"Dear {candidate.full_name},\\n\\n"
+            f"HR has invited you to complete an initial AI screening for {application.job.title}.\\n\\n"
+            "Open your candidate portal using the link below, sign in, and select \\"Start AI screening\\". "
+            "The conversation takes place in your browser using your microphone; it is not a normal phone call.\\n\\n"
+            f"Open your screening invitation: {portal_url}\\n\\n"
+            "The assistant will ask for your explicit consent before screening and transcription begin. "
+            "You may decline or stop the conversation at any time.\\n\\n"
+            "Best Regards,\\nHR Team\\nZETECH"
+        ),
+    )
+    if email_log is None:
+        email_log = EmailLog(
+            recipient_email=preview.recipient_email,
+            subject=preview.subject,
+            email_type="screening_invitation",
+            body=preview.body,
+            idempotency_key=key,
+            status="pending",
+            application_id=application.id,
+        )
+        db.add(email_log)
+        db.commit()
+        db.refresh(email_log)
+    else:
+        email_log.recipient_email = preview.recipient_email
+        email_log.subject = preview.subject
+        email_log.body = preview.body
+        email_log.status = "pending"
+        email_log.error_message = None
+        db.commit()
+
+    if not candidate.email_consent:
+        email_log.error_message = CONSENT_REQUIRED
+        db.commit()
+        db.refresh(email_log)
+        return email_log
+    try:
+        email_log.provider_message_id = _deliver(preview, key)
+    except EmailAutomationError as exc:
+        email_log.status = "failed"
+        email_log.error_message = str(exc)
+    else:
+        email_log.status = "sent"
+        email_log.error_message = None
+        email_log.sent_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(email_log)
+    return email_log
