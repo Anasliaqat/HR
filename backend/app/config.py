@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_v1_prefix: str = "/api"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    frontend_base_url: str = "http://localhost:5173"
     database_url: str = "sqlite:///./hr_hiring_local.db"
     auth_secret_key: str = ""
     hr_allowed_email: str = "anasarman997@gmail.com"
@@ -35,3 +36,6 @@ class Settings(BaseSettings):
     def default_local_database(cls, value: str | None) -> str:
         return value.strip() if isinstance(value, str) and value.strip() else "sqlite:///./hr_hiring_local.db"
     model_config = SettingsConfigDict(env_file=BACKEND_ENV_FILE, env_file_encoding="utf-8", extra="ignore")
+
+
+settings = Settings()
