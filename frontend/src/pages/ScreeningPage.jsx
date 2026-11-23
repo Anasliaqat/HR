@@ -358,7 +358,6 @@ export default function ScreeningPage() {
                   <tr>
                     <th>Candidate</th>
                     <th>Job title</th>
-                    <th>Candidate</th>
                     <th>Call status</th>
                     <th>Call date and time</th>
                     <th>Screening summary</th>
@@ -370,7 +369,6 @@ export default function ScreeningPage() {
                     <tr key={screening.id}>
                       <td>{screening.candidate_name}</td>
                       <td>{screening.job_title ?? "—"}</td>
-                      <td>{screening.candidate_name}</td>
                       <td><StatusBadge>{statusLabels[screening.status] ?? screening.status}</StatusBadge></td>
                       <td>
                         {new Date(
