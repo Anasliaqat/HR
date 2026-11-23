@@ -22,8 +22,13 @@ export default function BrowserConversation({ screeningId, candidate = false, se
   });
 
   async function start() {
-    setBusy(true); setError("");
+    setBusy(true);
+    setError("");
+    let connected = false;
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("Microphone access is unavailable. Open this page on localhost or HTTPS.");
+      }
       const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       permissionStream.getTracks().forEach((track) => track.stop());
       const conversationId = await conversation.startSession({
@@ -32,10 +37,22 @@ export default function BrowserConversation({ screeningId, candidate = false, se
         dynamicVariables: session.dynamic_variables,
         overrides: session.overrides,
       });
+      connected = true;
       await api.attachBrowserConversation(screeningId, conversationId, candidate);
     } catch (reason) {
+      // Do not leave an active ElevenLabs conversation running if the API
+      // cannot associate its conversation ID with the authorized screening.
+      if (connected) {
+        try {
+          await conversation.endSession();
+        } catch {
+          // Keep the original attach/start error visible to the user.
+        }
+      }
       setError(reason?.message || "Could not start the ElevenLabs session. Check microphone permission and agent configuration.");
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   }
   async function end() {
     setBusy(true);
