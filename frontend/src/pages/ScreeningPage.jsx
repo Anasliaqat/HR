@@ -150,7 +150,13 @@ export default function ScreeningPage() {
       });
       setReport(result);
       setScreeningId(result.id);
-      setNotice("Screening invitation created. The candidate can sign in to the Candidate Portal and start the browser-based AI conversation. No phone number or HR-side call is required.");
+      const invitation = await api.sendScreeningInvitation(result.id);
+      setNotice(
+        invitation.status === "sent"
+          ? "Screening created and invitation email sent. The candidate can open the email link, sign in, and start the browser-based AI conversation."
+          : invitation.error_message || "Screening created. Email was not sent because candidate email consent is not recorded or SMTP is not configured. The candidate can still see the invitation in their portal."
+      );
+      await loadData();
     } catch (requestError) {
       setError(requestError.message);
     } finally {
