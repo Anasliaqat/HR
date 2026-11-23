@@ -12,8 +12,12 @@ export default function CandidatePortalPage(){
  const [loading,setLoading]=useState(true),[submitting,setSubmitting]=useState(false),[starting,setStarting]=useState(""),[message,setMessage]=useState(""),[error,setError]=useState("");
  async function load(showLoader=true){if(showLoader)setLoading(true);setError("");try{const[j,a,s]=await Promise.all([api.getPublicJobs(),api.getMyApplications(),api.getMyScreenings()]);setJobs(j);setApplications(a);setScreenings(s);}catch(e){setError(e.message||"Unable to load your portal.");}finally{setLoading(false);}}
  useEffect(()=>{load();},[]);
+ useEffect(()=>{
+   const timer=window.setInterval(()=>{api.getMyScreenings().then(setScreenings).catch(()=>{});},15000);
+   return ()=>window.clearInterval(timer);
+ },[]);
  const filteredJobs=useMemo(()=>{const q=search.trim().toLowerCase();return jobs.filter(j=>!q||[j.title,j.department,j.location,j.description,...(j.required_skills||[])].filter(Boolean).join(" ").toLowerCase().includes(q));},[jobs,search]);
- const jobTitleById=useMemo(()=>new Map(applications.map(a=>[a.job_id,a.job_title])),[applications]);
+ const jobTitleById=useMemo(()=>new Map(applications.map(a=>[a.id,a.job_title])),[applications]);
  const pendingScreenings=screenings.filter(s=>["queued","not_started"].includes(s.status)||(s.status==="in_progress"&&!s.call_id));
  async function apply(e){e.preventDefault();if(!selectedJob||!resume){setError("Please attach your CV before submitting.");return;}setSubmitting(true);setError("");setMessage("");try{const a=await api.applyForJob({job_id:selectedJob.id,phone:phone.trim()||null,details:details.trim()?{notes:details.trim()}:{},email_consent:emailConsent});try{await api.uploadMyResume(a.id,resume);}catch(uploadError){setSelectedJob(null);await load(false);setMessage("Application created, but CV upload failed. Please contact HR before applying again.");throw uploadError;}setMessage("Your application and CV have been submitted successfully.");setSelectedJob(null);setPhone("");setDetails("");setResume(null);setEmailConsent(false);await load(false);}catch(e){setError(e.message||"Application could not be submitted.");}finally{setSubmitting(false);}}
  async function startScreening(s){setStarting(s.id);setError("");setMessage("");try{const data=await api.createBrowserSession(s.id,"voice",true);setActiveScreeningId(s.id);setSession(data);}catch(e){setError(e.message||"Could not open screening session.");}finally{setStarting("");}}
