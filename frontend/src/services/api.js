@@ -61,6 +61,7 @@ export const api = {
       .put(`/candidates/${id}/email-consent`, { email_consent: emailConsent })
       .then(({ data }) => data),
   getApplications: () => client.get("/applications").then(({ data }) => data),
+  deleteApplication: (id) => client.delete(`/applications/${id}`),
   createApplication: (payload) =>
     client.post("/applications", payload).then(({ data }) => data),
   updateApplication: (id, payload) =>
