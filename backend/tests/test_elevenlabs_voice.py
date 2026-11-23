@@ -4,6 +4,7 @@ import hmac
 import time
 
 from app.api.screening import _transcript_text, _verify_elevenlabs_signature
+from app.agents.screening_agent import candidate_consented_on_call
 from app.config import settings
 from app.services import voice_service
 
@@ -82,3 +83,23 @@ def test_elevenlabs_transcript_turns_are_normalized_for_consent_parser():
     ])
     assert "AI: Do you consent" in text
     assert "User: Yes, I agree." in text
+
+
+def test_candidate_withdrawal_overrides_initial_consent():
+    transcript = (
+        "AI: Do you consent to screening and transcription?\n"
+        "User: Yes, I agree.\n"
+        "AI: Please introduce yourself.\n"
+        "User: I withdraw my consent."
+    )
+    assert candidate_consented_on_call(transcript) is False
+
+
+def test_candidate_affirmative_consent_without_withdrawal_is_accepted():
+    transcript = (
+        "AI: Do you consent to screening and transcription?\n"
+        "User: Yes, I agree.\n"
+        "AI: Please introduce yourself.\n"
+        "User: I am a Python developer."
+    )
+    assert candidate_consented_on_call(transcript) is True
