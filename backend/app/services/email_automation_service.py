@@ -322,14 +322,14 @@ def send_screening_invitation(db: Session, screening: Screening) -> EmailLog:
         recipient_email=candidate.email,
         subject=f"Your ZETECH AI screening invitation – {application.job.title}",
         body=(
-            f"Dear {candidate.full_name},\\n\\n"
-            f"HR has invited you to complete an initial AI screening for {application.job.title}.\\n\\n"
-            "Open your candidate portal using the link below, sign in, and select \\"Start AI screening\\". "
-            "The conversation takes place in your browser using your microphone; it is not a normal phone call.\\n\\n"
-            f"Open your screening invitation: {portal_url}\\n\\n"
+            f"Dear {candidate.full_name},\n\n"
+            f"HR has invited you to complete an initial AI screening for {application.job.title}.\n\n"
+            "Open your candidate portal using the link below, sign in, and select \"Start AI screening\". "
+            "The conversation takes place in your browser using your microphone; it is not a normal phone call.\n\n"
+            f"Open your screening invitation: {portal_url}\n\n"
             "The assistant will ask for your explicit consent before screening and transcription begin. "
-            "You may decline or stop the conversation at any time.\\n\\n"
-            "Best Regards,\\nHR Team\\nZETECH"
+            "You may decline or stop the conversation at any time.\n\n"
+            "Best Regards,\nHR Team\nZETECH"
         ),
     )
     if email_log is None:
