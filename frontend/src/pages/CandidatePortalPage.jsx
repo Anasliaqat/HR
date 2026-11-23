@@ -1,97 +1,34 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowRight, Bell, BriefcaseBusiness, CheckCircle2, Clock3, FileText, LogOut, MapPin, RefreshCw, Search, ShieldCheck, Sparkles, UploadCloud, X } from "lucide-react";
 import { api } from "../services/api";
 import BrowserConversation from "../components/BrowserConversation";
-
-export default function CandidatePortalPage() {
-  const [jobs, setJobs] = useState([]);
-  const [applications, setApplications] = useState([]);
-  const [screenings, setScreenings] = useState([]);
-  const [selected, setSelected] = useState("");
-  const [phone, setPhone] = useState("");
-  const [details, setDetails] = useState("");
-  const [consent, setConsent] = useState(false);
-  const [resume, setResume] = useState(null);
-  const [session, setSession] = useState(null);
-  const [activeScreeningId, setActiveScreeningId] = useState("");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-
-  async function load() {
-    try {
-      const [jobRows, applicationRows, screeningRows] = await Promise.all([
-        api.getPublicJobs(), api.getMyApplications(), api.getMyScreenings(),
-      ]);
-      setJobs(jobRows); setApplications(applicationRows); setScreenings(screeningRows);
-    } catch (requestError) { setError(requestError.message); }
-  }
-  useEffect(() => { load(); }, []);
-
-  async function apply(event) {
-    event.preventDefault(); setError(""); setMessage("");
-    try {
-      const application = await api.applyForJob({
-        job_id: selected, phone, details: details ? { notes: details } : {},
-        email_consent: consent,
-      });
-      if (resume) await api.uploadMyResume(application.id, resume);
-      setMessage("Application submitted.");
-      setSelected(""); setResume(null); await load();
-    } catch (requestError) { setError(requestError.message); }
-  }
-
-  async function startScreening(screening) {
-    setError(""); setMessage("");
-    try {
-      const data = await api.createBrowserSession(screening.id, "voice", true);
-      setActiveScreeningId(screening.id);
-      setSession(data);
-    } catch (requestError) { setError(requestError.message); }
-  }
-  function logout() {
-    localStorage.removeItem("hireflow.accessToken");
-    localStorage.removeItem("hireflow.role");
-    location.href = "/login";
-  }
-
-  return <main style={{ maxWidth: 900, margin: "40px auto", padding: 24 }}>
-    <header style={{ display: "flex", justifyContent: "space-between" }}>
-      <div><p className="eyebrow">CANDIDATE PORTAL</p><h1>Find your next opportunity</h1></div>
-      <button onClick={logout}>Log out</button>
-    </header>
-    <section><h2>Open positions</h2>
-      {jobs.length ? jobs.map(job => <article key={job.id} style={{ padding: 16, border: "1px solid var(--border)", borderRadius: 12, marginBottom: 12 }}>
-        <h3>{job.title}</h3><p>{job.department} · {job.location} · {job.employment_type}</p><p>{job.description}</p>
-        <button onClick={() => setSelected(job.id)}>Apply for this job</button>
-      </article>) : <p>No published jobs at the moment.</p>}
-    </section>
-    {selected && <form onSubmit={apply} style={{ display: "grid", gap: 12, maxWidth: 520 }}>
-      <h2>Application details</h2>
-      <input placeholder="Phone number (optional)" value={phone} onChange={event => setPhone(event.target.value)} />
-      <textarea placeholder="Additional information" value={details} onChange={event => setDetails(event.target.value)} />
-      <label>Upload CV (PDF, DOCX, or TXT, max 10 MB)
-        <input required type="file" accept=".pdf,.docx,.txt" onChange={event => setResume(event.target.files?.[0] || null)} />
-      </label>
-      <label><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} /> I agree to receive application-related emails.</label>
-      <button className="button button-primary">Submit application</button>
-    </form>}
-    <section><h2>My applications</h2>
-      {applications.map(application => <article key={application.id} style={{ padding: 12, borderBottom: "1px solid var(--border)" }}>
-        <strong>{application.job_title}</strong><p>Status: {application.status} · Applied: {new Date(application.applied_at).toLocaleDateString()}</p>
-      </article>)}
-    </section>
-    <section><h2>My AI screening sessions</h2>
-      {screenings.length ? screenings.map(screening => <article key={screening.id} style={{ padding: 12, borderBottom: "1px solid var(--border)" }}>
-        <strong>Initial screening</strong><p>Status: {screening.status}</p>
-        {(screening.status === "queued" || (screening.status === "in_progress" && !screening.call_id)) &&
-          <button className="button button-primary" onClick={() => startScreening(screening)}>Open screening session</button>}
-        {screening.status === "completed" && <p>Your screening is complete. HR will review your responses.</p>}
-      </article>) : <p>No screening invitation is available yet. HR will create one after reviewing your application.</p>}
-    </section>
-    {session && activeScreeningId && <BrowserConversation
-      screeningId={activeScreeningId} candidate session={session}
-      onFinished={async () => { setSession(null); await load(); }}
-    />}
-    {message && <p role="status">{message}</p>}
-    {error && <p role="alert" style={{ color: "crimson" }}>{error}</p>}
-  </main>;
+import "./candidate-portal.css";
+const niceStatus=(v="")=>v.replaceAll("_"," ");
+const dateText=v=>v?new Date(v).toLocaleDateString():"—";
+export default function CandidatePortalPage(){
+ const [jobs,setJobs]=useState([]),[applications,setApplications]=useState([]),[screenings,setScreenings]=useState([]);
+ const [search,setSearch]=useState(""),[selectedJob,setSelectedJob]=useState(null),[phone,setPhone]=useState(""),[details,setDetails]=useState("");
+ const [emailConsent,setEmailConsent]=useState(false),[resume,setResume]=useState(null),[session,setSession]=useState(null),[activeScreeningId,setActiveScreeningId]=useState("");
+ const [loading,setLoading]=useState(true),[submitting,setSubmitting]=useState(false),[starting,setStarting]=useState(""),[message,setMessage]=useState(""),[error,setError]=useState("");
+ async function load(showLoader=true){if(showLoader)setLoading(true);setError("");try{const[j,a,s]=await Promise.all([api.getPublicJobs(),api.getMyApplications(),api.getMyScreenings()]);setJobs(j);setApplications(a);setScreenings(s);}catch(e){setError(e.message||"Unable to load your portal.");}finally{setLoading(false);}}
+ useEffect(()=>{load();},[]);
+ const filteredJobs=useMemo(()=>{const q=search.trim().toLowerCase();return jobs.filter(j=>!q||[j.title,j.department,j.location,j.description,...(j.required_skills||[])].filter(Boolean).join(" ").toLowerCase().includes(q));},[jobs,search]);
+ const jobTitleById=useMemo(()=>new Map(applications.map(a=>[a.job_id,a.job_title])),[applications]);
+ const pendingScreenings=screenings.filter(s=>["queued","not_started"].includes(s.status)||(s.status==="in_progress"&&!s.call_id));
+ async function apply(e){e.preventDefault();if(!selectedJob||!resume){setError("Please attach your CV before submitting.");return;}setSubmitting(true);setError("");setMessage("");try{const a=await api.applyForJob({job_id:selectedJob.id,phone:phone.trim()||null,details:details.trim()?{notes:details.trim()}:{},email_consent:emailConsent});try{await api.uploadMyResume(a.id,resume);}catch(uploadError){setSelectedJob(null);await load(false);setMessage("Application created, but CV upload failed. Please contact HR before applying again.");throw uploadError;}setMessage("Your application and CV have been submitted successfully.");setSelectedJob(null);setPhone("");setDetails("");setResume(null);setEmailConsent(false);await load(false);}catch(e){setError(e.message||"Application could not be submitted.");}finally{setSubmitting(false);}}
+ async function startScreening(s){setStarting(s.id);setError("");setMessage("");try{const data=await api.createBrowserSession(s.id,"voice",true);setActiveScreeningId(s.id);setSession(data);}catch(e){setError(e.message||"Could not open screening session.");}finally{setStarting("");}}
+ function logout(){localStorage.removeItem("hireflow.accessToken");localStorage.removeItem("hireflow.role");localStorage.removeItem("hireflow.email");window.location.href="/login";}
+ return <main className="candidate-shell">
+ <header className="candidate-topbar"><a className="candidate-brand" href="/candidate"><span className="candidate-brand-mark">Z</span><span><strong>ZETECH</strong><small>Candidate portal</small></span></a><div className="candidate-top-actions"><span className="candidate-user">{localStorage.getItem("hireflow.email")||"Candidate account"}</span><button className="candidate-logout" onClick={logout}><LogOut size={16}/> Log out</button></div></header>
+ <section className="candidate-welcome"><div><p className="candidate-eyebrow"><Sparkles size={15}/> YOUR CAREER JOURNEY</p><h1>Find the work that <span>moves you forward.</span></h1><p>Explore opportunities, submit your CV, and follow every step of your application in one place.</p></div><div className="candidate-welcome-art"><BriefcaseBusiness size={62}/><span>Build your next chapter</span></div></section>
+ {pendingScreenings.length>0&&<section className="candidate-alert"><span className="candidate-alert-icon"><Bell size={20}/></span><div><strong>You have an AI screening invitation</strong><p>Open your screening session when you are ready. The assistant will ask for your consent first.</p></div><a href="#candidate-screenings">View invitation <ArrowRight size={15}/></a></section>}
+ {message&&<div className="candidate-message" role="status"><CheckCircle2 size={17}/>{message}</div>}{error&&<div className="candidate-error" role="alert">{error}</div>}
+ <section className="candidate-stats"><article><span><BriefcaseBusiness size={18}/></span><div><strong>{jobs.length}</strong><small>Open positions</small></div></article><article><span><FileText size={18}/></span><div><strong>{applications.length}</strong><small>Applications submitted</small></div></article><article><span><Clock3 size={18}/></span><div><strong>{pendingScreenings.length}</strong><small>Screening invitations</small></div></article></section>
+ <section className="candidate-section"><div className="candidate-section-heading"><div><p className="candidate-eyebrow">CAREER OPPORTUNITIES</p><h2>Explore open positions</h2><p>Choose a role that matches your skills and interests.</p></div><label className="candidate-search"><Search size={17}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search jobs or skills..."/></label></div>
+ {loading?<div className="candidate-empty">Loading positions…</div>:filteredJobs.length===0?<div className="candidate-empty">{jobs.length?"No jobs match your search.":"There are no open positions right now."}</div>:<div className="candidate-job-grid">{filteredJobs.map(job=><article className="candidate-job-card" key={job.id}><div className="candidate-job-icon"><BriefcaseBusiness size={21}/></div><span className="candidate-open-tag">Open</span><h3>{job.title}</h3><div className="candidate-job-meta"><span>{job.department||"Technology"}</span><span><MapPin size={14}/>{job.location||"Location not specified"}</span><span>{job.employment_type||"Full-time"}</span></div><p className="candidate-job-description">{job.description}</p>{job.required_skills?.length>0&&<div className="candidate-skill-list">{job.required_skills.slice(0,5).map(skill=><span key={skill}>{skill}</span>)}</div>}<button className="candidate-apply-button" onClick={()=>{setSelectedJob(job);setError("");}} disabled={applications.some(a=>a.job_id===job.id)}>{applications.some(a=>a.job_id===job.id)?"Already applied":"Apply for this role"} <ArrowRight size={16}/></button></article>)}</div>}</section>
+ <section className="candidate-section" id="candidate-applications"><div className="candidate-section-heading"><div><p className="candidate-eyebrow">YOUR PROGRESS</p><h2>My applications</h2><p>Track the status of each application.</p></div><button className="candidate-refresh" onClick={()=>load()} disabled={loading}><RefreshCw size={15}/> Refresh</button></div><div className="candidate-table-wrap">{applications.length===0?<div className="candidate-empty">Your submitted applications will appear here.</div>:<table className="candidate-table"><thead><tr><th>Position</th><th>Date applied</th><th>Status</th></tr></thead><tbody>{applications.map(a=><tr key={a.id}><td><strong>{a.job_title||"Position"}</strong><small>Application #{a.id.slice(0,8)}</small></td><td>{dateText(a.applied_at)}</td><td><span className="candidate-status">{niceStatus(a.status)}</span></td></tr>)}</tbody></table>}</div></section>
+ <section className="candidate-section" id="candidate-screenings"><div className="candidate-section-heading"><div><p className="candidate-eyebrow">NEXT STEP</p><h2>AI screening sessions</h2><p>Complete your initial conversation with the ZETECH screening assistant.</p></div></div><div className="candidate-screening-list">{screenings.length===0?<div className="candidate-empty">No screening invitation yet. HR will notify you here after reviewing your application.</div>:screenings.map(s=>{const canStart=["queued","not_started"].includes(s.status)||(s.status==="in_progress"&&!s.call_id);return <article className="candidate-screening-card" key={s.id}><div className="candidate-screening-icon"><ShieldCheck size={22}/></div><div className="candidate-screening-info"><strong>Initial AI screening</strong><span>{jobTitleById.get(s.application_id)||"Your application"} · {niceStatus(s.status)}</span><small>About 5–10 minutes · Microphone required</small></div>{canStart?<button className="candidate-apply-button" onClick={()=>startScreening(s)} disabled={Boolean(starting)}>{starting===s.id?"Preparing…":"Start screening"} <ArrowRight size={16}/></button>:s.status==="completed"?<span className="candidate-complete"><CheckCircle2 size={16}/> Completed</span>:<span className="candidate-screening-status">{niceStatus(s.status)}</span>}</article>;})}</div><p className="candidate-privacy-note">This is a browser voice conversation, not a phone call. Allow microphone access, or use text chat as an alternative. The assistant asks for consent before screening and transcription begin. You can stop at any time.</p>{session&&activeScreeningId&&<div className="candidate-conversation-wrap"><BrowserConversation screeningId={activeScreeningId} candidate session={session} onFinished={async()=>{setSession(null);setActiveScreeningId("");await load(false);}}/></div>}</section>
+ <footer className="candidate-footer"><span>© {new Date().getFullYear()} ZETECH · Candidate portal</span><span>AI-assisted, human-led recruitment</span></footer>
+ {selectedJob&&<div className="candidate-modal-backdrop" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)setSelectedJob(null);}}><section className="candidate-application-modal" role="dialog" aria-modal="true" aria-labelledby="candidate-apply-title"><header><div><p className="candidate-eyebrow">APPLICATION FORM</p><h2 id="candidate-apply-title">Apply for {selectedJob.title}</h2><p>Complete the details and attach your latest CV.</p></div><button type="button" aria-label="Close form" onClick={()=>setSelectedJob(null)}><X size={20}/></button></header><form onSubmit={apply}><div className="candidate-form-grid"><label>Position<input value={selectedJob.title} readOnly/></label><label>Department<input value={selectedJob.department||"Not specified"} readOnly/></label><label className="candidate-form-full">Phone number <span>(optional)</span><input type="tel" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+92 3XX XXXXXXX"/></label><label className="candidate-form-full">Additional information <span>(optional)</span><textarea rows={4} value={details} onChange={e=>setDetails(e.target.value)} placeholder="Share a short note about your interest or relevant experience."/></label><label className="candidate-upload-box candidate-form-full"><UploadCloud size={25}/><strong>{resume?resume.name:"Upload your CV / Resume"}</strong><span>PDF, DOCX, or TXT · Maximum 10 MB</span><input required type="file" accept=".pdf,.docx,.txt" onChange={e=>setResume(e.target.files?.[0]||null)}/></label></div><label className="candidate-consent"><input type="checkbox" checked={emailConsent} onChange={e=>setEmailConsent(e.target.checked)}/><span>I agree to receive application updates and recruitment emails from ZETECH. This is optional.</span></label><div className="candidate-form-actions"><button type="button" className="candidate-cancel-button" onClick={()=>setSelectedJob(null)}>Cancel</button><button className="candidate-apply-button" type="submit" disabled={submitting}>{submitting?"Submitting…":"Submit application"} <ArrowRight size={16}/></button></div></form></section></div>}
+ </main>;
 }
