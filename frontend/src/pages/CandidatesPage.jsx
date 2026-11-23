@@ -79,7 +79,12 @@ export default function CandidatesPage() {
     setDeletingCandidate(true);
     setError("");
     try {
+      const candidateResumes = resumes.filter((resume) => resume.candidate_id === selected.id);
+      for (const resume of candidateResumes) {
+        await api.deleteResume(resume.id);
+      }
       await api.deleteCandidate(selected.id);
+      setResumes((rows) => rows.filter((resume) => resume.candidate_id !== selected.id));
       setSelected(null);
       setNotice("Candidate profile deleted.");
       await loadCandidates();
