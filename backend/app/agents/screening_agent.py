@@ -36,6 +36,16 @@ _CONSENT_AFFIRM = re.compile(
     r"no problem|no worries|that's fine|that is fine|go ahead|please do)\b",
     re.IGNORECASE,
 )
+# Consent may be withdrawn at any point, not only in the first candidate turn.
+_CONSENT_WITHDRAWAL = re.compile(
+    r"\b(?:withdraw(?:ing)? (?:my )?consent|"
+    r"i no longer consent|i don't consent anymore|i do not consent anymore|"
+    r"stop (?:the )?(?:screening|transcription)|"
+    r"end (?:the )?(?:screening|conversation)|"
+    r"don't want (?:this|my answers) (?:recorded|transcribed|stored)|"
+    r"do not want (?:this|my answers) (?:recorded|transcribed|stored))\b",
+    re.IGNORECASE,
+)
 
 _SCREENING_INSTRUCTIONS = """You are an AI assistant conducting a short browser-based screening
 conversation for a job application. Speak in simple, professional English and ask one
@@ -73,16 +83,21 @@ class ScreeningSummary(BaseModel):
 
 
 def candidate_consented_on_call(transcript: str) -> bool | None:
-    """Return explicit consent from the first candidate turn, or None if unclear."""
-    match = _CONSENT_RESPONSE.search(transcript)
-    if not match:
+    """Return consent only if it was explicit and was not later withdrawn."""
+    matches = list(_CONSENT_RESPONSE.finditer(transcript))
+    if not matches:
         return None
-    response = match.group(1).strip()
-    if _CONSENT_DECLINE.search(response):
+
+    first_response = matches[0].group(1).strip()
+    if _CONSENT_DECLINE.search(first_response):
         return False
-    if _CONSENT_AFFIRM.search(response):
-        return True
-    return None
+    if not _CONSENT_AFFIRM.search(first_response):
+        return None
+
+    # A later withdrawal overrides an earlier affirmative response.
+    if any(_CONSENT_WITHDRAWAL.search(match.group(1)) for match in matches[1:]):
+        return False
+    return True
 
 
 def build_call_prompt(job: Job) -> str:
