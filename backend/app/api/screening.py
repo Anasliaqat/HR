@@ -33,6 +33,8 @@ from app.schemas.screening import (
     ScreeningStartRequest,
 )
 from app.services.voice_service import ElevenLabsServiceError, create_browser_session
+from app.services.email_automation_service import EmailAutomationError, send_screening_invitation
+from app.schemas.email_automation import EmailLogResponse
 from app.security import require_candidate
 
 logger = logging.getLogger(__name__)
@@ -169,6 +171,25 @@ def start_screening(
     db.commit()
     db.refresh(screening)
     return _response(screening)
+
+
+@router.post("/{screening_id}/invite", response_model=EmailLogResponse)
+def email_screening_invitation(
+    screening_id: UUID,
+    db: Session = Depends(get_db),
+) -> EmailLogResponse:
+    """Send the candidate a portal link for their browser-based screening."""
+    screening = db.scalar(
+        select(Screening)
+        .options(joinedload(Screening.candidate), joinedload(Screening.application).joinedload(Application.job))
+        .where(Screening.id == screening_id)
+    )
+    if screening is None:
+        raise HTTPException(status_code=404, detail="Screening not found")
+    try:
+        return EmailLogResponse.model_validate(send_screening_invitation(db, screening))
+    except EmailAutomationError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def _browser_session_payload(screening: Screening, db: Session, mode: str) -> dict[str, object]:
